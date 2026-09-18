@@ -313,8 +313,10 @@ const Store = {
     }
   },
   async lock(pass){
-    this.passKey = await this.deriveKey(pass, crypto.getRandomValues(new Uint8Array(16)));
-    // re-derive against stored salt on future unlocks: keep salt from cipher
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    // stash the salt first so save() encrypts with the SAME key it stores
+    this._cipher = {enc:1, v:1, salt: btoa(String.fromCharCode(...salt)), iv:"", data:""};
+    this.passKey = await this.deriveKey(pass, salt);
     this.locked = true;
     await this.save();
   },
