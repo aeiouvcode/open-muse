@@ -2,152 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:*; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Open Muse - a personal agent that belongs to you</title>
 <meta name="description" content="Open Muse is an open-source, local-first personal AI agent: goals to plans, approvals, memory, audit trail and a private local vault. Your machine, your rules.">
-<style>
-:root{
-  --bg:#0b0d12; --bg2:#10141d; --panel:#141926; --panel2:#1a2132; --line:#232b3f;
-  --ink:#e8ecf4; --dim:#8b94a9; --dim2:#5b6478;
-  --acc:#7c6cf5; --acc2:#4ec9b0; --warn:#e8b34b; --bad:#e26d6d; --ok:#56c98d;
-  --r:14px;
-}
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
-body{background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
-button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
-input,select,textarea{font:inherit;color:var(--ink);background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;outline:none}
-input:focus,select:focus,textarea:focus{border-color:var(--acc)}
-code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#2a3348;border-radius:8px}
-
-/* ---------- layout ---------- */
-#app{display:grid;grid-template-columns:280px 1fr 360px;grid-template-rows:100vh;height:100vh}
-aside.rail{background:var(--bg2);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
-aside.dock{background:var(--bg2);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
-main{display:flex;flex-direction:column;min-width:0;min-height:0;background:radial-gradient(1200px 500px at 60% -10%,#151a2b 0%,var(--bg) 55%)}
-.brand{padding:18px 18px 14px;border-bottom:1px solid var(--line)}
-.brand h1{font-size:19px;letter-spacing:.2px;display:flex;align-items:center;gap:9px}
-.brand h1 .dot{width:11px;height:11px;border-radius:50%;background:conic-gradient(var(--acc),var(--acc2),var(--acc));box-shadow:0 0 14px #7c6cf588}
-.brand p{color:var(--dim);font-size:12px;margin-top:3px}
-.rail nav{padding:10px;display:flex;flex-direction:column;gap:2px}
-.navbtn{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:10px;color:var(--dim);font-size:14px;text-align:left;width:100%}
-.navbtn:hover{background:var(--panel);color:var(--ink)}
-.navbtn.on{background:var(--panel2);color:var(--ink)}
-.navbtn svg{width:16px;height:16px;flex:none}
-.rail .spacer{flex:1}
-.vmchip{margin:12px;padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
-.vmchip .t{font-size:12px;color:var(--dim);display:flex;justify-content:space-between;align-items:center}
-.vmchip .st{font-size:13px;margin-top:5px;display:flex;align-items:center;gap:7px}
-.pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--dim)}
-.pill.ok{color:var(--ok);border-color:#2c4d3d}.pill.warn{color:var(--warn);border-color:#4d4229}.pill.bad{color:var(--bad);border-color:#4d2c2c}
-.pill .d{width:6px;height:6px;border-radius:50%;background:currentColor}
-
-/* ---------- views ---------- */
-.view{display:none;flex-direction:column;min-height:0;flex:1}
-.view.on{display:flex}
-.viewhead{padding:16px 22px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.viewhead h2{font-size:16px}
-.viewhead .sub{color:var(--dim);font-size:12.5px}
-.viewbody{flex:1;overflow-y:auto;padding:18px 22px;min-height:0}
-
-/* ---------- chat ---------- */
-#chatlog{flex:1;overflow-y:auto;padding:22px;display:flex;flex-direction:column;gap:14px;min-height:0}
-.msg{max-width:72%;padding:11px 14px;border-radius:16px;white-space:pre-wrap;word-break:break-word}
-.msg.user{align-self:flex-end;background:var(--acc);color:#fff;border-bottom-right-radius:5px}
-.msg.muse{align-self:flex-start;background:var(--panel);border:1px solid var(--line);border-bottom-left-radius:5px}
-.msg.sys{align-self:center;background:none;border:1px dashed var(--line);color:var(--dim);font-size:12.5px;max-width:88%;text-align:center}
-.msg .meta{font-size:11px;color:var(--dim2);margin-top:6px}
-.msg.muse .body p{margin:.35em 0}
-.card{align-self:stretch;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;max-width:88%}
-.card h4{font-size:13.5px;display:flex;align-items:center;gap:8px}
-.card .small{font-size:12px;color:var(--dim);margin-top:4px}
-.card .row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
-.btn{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:7px 13px;font-size:13px}
-.btn:hover{border-color:var(--acc)}
-.btn.pri{background:var(--acc);border-color:var(--acc);color:#fff}
-.btn.okb{border-color:#2c4d3d;color:var(--ok)}
-.btn.badb{border-color:#4d2c2c;color:var(--bad)}
-.btn:disabled{opacity:.45;cursor:default}
-#composer{border-top:1px solid var(--line);padding:14px 22px;display:flex;gap:10px;align-items:flex-end}
-#composer textarea{flex:1;resize:none;min-height:46px;max-height:160px}
-#sendbtn{background:var(--acc);border-radius:12px;padding:11px 16px;color:#fff;font-weight:600}
-#sendbtn:disabled{opacity:.4}
-.typing{display:inline-flex;gap:4px;padding:4px 0}
-.typing i{width:6px;height:6px;border-radius:50%;background:var(--dim);animation:b 1.2s infinite}
-.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
-@keyframes b{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-4px);opacity:1}}
-
-/* ---------- goals ---------- */
-.goalgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
-.goal{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:15px;display:flex;flex-direction:column;gap:9px}
-.goal h3{font-size:14.5px}
-.goal .steps{display:flex;flex-direction:column;gap:6px;margin-top:2px}
-.step{display:flex;gap:9px;align-items:flex-start;font-size:13px;padding:7px 9px;border-radius:9px;background:var(--bg2);border:1px solid var(--line)}
-.step .ic{width:17px;text-align:center;flex:none;margin-top:1px}
-.step.done{opacity:.62}.step.done .st-t{text-decoration:line-through}
-.step .tag{margin-left:auto;font-size:10px;color:var(--dim2);border:1px solid var(--line);border-radius:99px;padding:1px 7px;flex:none}
-.progbar{height:6px;border-radius:99px;background:var(--bg);overflow:hidden}
-.progbar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc),var(--acc2));border-radius:99px}
-
-/* ---------- memory ---------- */
-.memitem{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border:1px solid var(--line);border-radius:12px;background:var(--panel);margin-bottom:9px}
-.memitem .txt{flex:1;font-size:13.5px}
-.memitem .when{font-size:11px;color:var(--dim2);margin-top:3px}
-.iconbtn{color:var(--dim);padding:4px;border-radius:8px}
-.iconbtn:hover{color:var(--bad);background:var(--panel2)}
-
-/* ---------- audit ---------- */
-#auditlog{display:flex;flex-direction:column;gap:0}
-.auline{display:flex;gap:12px;padding:9px 4px;border-bottom:1px solid #1a2132;font-size:13px}
-.auline .t{color:var(--dim2);font-size:11.5px;white-space:nowrap;padding-top:2px;font-family:ui-monospace,monospace}
-.auline .k{flex:none;font-size:10px;border:1px solid var(--line);border-radius:99px;padding:2px 8px;color:var(--dim);height:fit-content}
-
-/* ---------- connectors ---------- */
-.conn{display:flex;align-items:center;gap:13px;padding:14px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);margin-bottom:11px}
-.conn .glyph{width:38px;height:38px;border-radius:11px;background:var(--panel2);display:grid;place-items:center;font-size:18px;flex:none}
-.conn .inf{flex:1}.conn .inf b{font-size:14px}.conn .inf p{font-size:12px;color:var(--dim)}
-.seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.seg button{padding:6px 11px;font-size:12px;color:var(--dim);border-left:1px solid var(--line)}
-.seg button:first-child{border-left:none}
-.seg button.on{background:var(--acc);color:#fff}
-
-/* ---------- dock ---------- */
-.dock header{padding:15px 16px 11px;border-bottom:1px solid var(--line)}
-.dock header h3{font-size:13.5px;display:flex;align-items:center;gap:8px}
-.dock section{padding:13px 16px;border-bottom:1px solid var(--line);overflow-y:auto}
-.dock .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim2);margin-bottom:8px}
-.kv{display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;color:var(--dim)}
-.kv b{color:var(--ink);font-weight:500}
-.queue-item{font-size:12.5px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:7px;background:var(--panel)}
-.queue-item .w{color:var(--dim2);font-size:11px;margin-top:2px}
-
-/* ---------- modal ---------- */
-#modalwrap{position:fixed;inset:0;background:#060810cc;display:none;place-items:center;z-index:50;backdrop-filter:blur(4px)}
-#modalwrap.on{display:grid}
-.modal{width:min(560px,92vw);max-height:86vh;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px}
-.modal h3{font-size:16px;margin-bottom:6px}
-.modal .sub{color:var(--dim);font-size:13px;margin-bottom:14px}
-.field{margin-bottom:13px}.field label{display:block;font-size:12px;color:var(--dim);margin-bottom:5px}
-.field input,.field select,.field textarea{width:100%}
-.modal .row{display:flex;gap:9px;justify-content:flex-end;margin-top:16px}
-
-.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:10px 16px;border-radius:12px;font-size:13px;z-index:80;display:none}
-.toast.on{display:block}
-
-.empty{color:var(--dim2);font-size:13px;text-align:center;padding:34px 10px;border:1px dashed var(--line);border-radius:var(--r)}
-.suggest{display:flex;gap:10px;align-items:flex-start;background:linear-gradient(135deg,#1a2132,#141926);border:1px solid #2b3450;border-radius:var(--r);padding:13px 15px;max-width:88%;align-self:flex-start}
-.suggest .s-t{font-size:13.5px;flex:1}
-@media (max-width:1180px){#app{grid-template-columns:240px 1fr}aside.dock{display:none}}
-@media (max-width:820px){
-#app{grid-template-columns:1fr}
-aside.rail{display:none}
-aside.rail.open{display:flex;position:fixed;left:0;top:0;bottom:0;width:min(300px,84vw);z-index:60;box-shadow:0 0 60px #000c}
-#railbackdrop{position:fixed;inset:0;background:#060810aa;z-index:55;display:block}
-#menubtn{display:block!important}}
-#railbackdrop{display:none}
-#menubtn{display:none;position:fixed;top:12px;left:12px;z-index:40;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
-</style>
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <button id="menubtn" title="Menu">☰</button>
@@ -155,27 +15,42 @@ aside.rail.open{display:flex;position:fixed;left:0;top:0;bottom:0;width:min(300p
 <div id="app">
   <aside class="rail" id="rail">
     <div class="brand">
-      <h1><span class="dot"></span>Open Muse</h1>
+      <h1><span class="dot" id="presence"></span>Open Muse</h1>
       <p>An open personal agent. Your machine, your rules.</p>
     </div>
     <nav>
       <button class="navbtn on" data-view="chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chat</button>
       <button class="navbtn" data-view="goals"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg>Goals &amp; plans</button>
       <button class="navbtn" data-view="memory"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 1 7 7c0 2.4-1.2 4-2.5 5.5S15 17.5 15 20a3 3 0 0 1-6 0c0-2.5-.5-3.5-1.5-5.5S5 11.4 5 9a7 7 0 0 1 7-7z"/></svg>Memory <span class="pill" id="memcount" style="margin-left:auto">0</span></button>
+      <button class="navbtn" data-view="tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.1-2.1 2.7-2.5z"/></svg>Tools &amp; skills</button>
+      <button class="navbtn" data-view="studio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Studio <span class="pill" id="appcount" style="margin-left:auto">0</span></button>
       <button class="navbtn" data-view="connectors"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 2v6M15 2v6M7 8h10v4a5 5 0 0 1-10 0zM12 17v5"/></svg>Permissions</button>
       <button class="navbtn" data-view="audit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18M8 17v-6M13 17V7M18 17v-3"/></svg>Audit trail</button>
+      <button class="navbtn" data-view="evolve"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6"/></svg>Evolve <span class="pill" id="evocount" style="margin-left:auto">0</span></button>
+      
       <button class="navbtn" data-view="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.9 2.9l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.9-2.9l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.9-2.9l.1.1a1.7 1.7 0 0 0 1.9.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.5h0a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.9 2.9l-.1.1a1.7 1.7 0 0 0-.3 1.9v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
     </nav>
     <div class="spacer"></div>
     <div class="vmchip">
       <div class="t"><span>PERSONAL VM</span><span class="pill ok" id="vmstate"><span class="d"></span>local</span></div>
-      <div class="st" id="vmdesc">Everything stays in this browser. Nothing leaves except calls to your model provider.</div>
+      <div class="st" id="vmdesc">Muse's orb is this tab: it sleeps when you close it, wakes with everything intact, and catches up on return.</div>
     </div>
   </aside>
 
   <main>
     <!-- CHAT -->
     <section class="view on" id="view-chat">
+      <div id="modebar">
+        <div class="modeswitch">
+          <button class="modebtn on" data-mode="agent">Agent</button>
+          <button class="modebtn" data-mode="chat">Chat</button>
+          <button class="modebtn" data-mode="coder">Coder</button>
+        </div>
+        <span class="modenote" id="modenote">Personal agent</span>
+        <span style="flex:1"></span>
+        <button class="btn coderonly" id="selftestsbtn">Self-tests</button>
+        <button class="btn coderonly" id="diff2prop">Last diff &rarr; proposal</button>
+      </div>
       <div id="chatlog"></div>
       <div id="composer">
         <textarea id="chatinput" placeholder="Tell Muse what needs to get done...  (try: 'my goal is to run a 10k in 10 weeks')" rows="1"></textarea>
@@ -186,18 +61,73 @@ aside.rail.open{display:flex;position:fixed;left:0;top:0;bottom:0;width:min(300p
     <!-- GOALS -->
     <section class="view" id="view-goals">
       <div class="viewhead"><h2>Goals &amp; plans</h2><span class="sub">Muse turns goals into plans, then advances them step by step. Sensitive steps wait for your approval.</span>
-        <span style="flex:1"></span><button class="btn pri" id="newgoalbtn">+ New goal</button></div>
-      <div class="viewbody"><div class="goalgrid" id="goalgrid"></div></div>
+        <span style="flex:1"></span><label class="trow checkrow" style="gap:6px"><input type="checkbox" id="autonomycb"><span class="small" style="font-size:12px;color:var(--dim)">Autonomous</span></label>
+        <button class="btn pri" id="newgoalbtn">+ New goal</button></div>
+      <div class="viewbody">
+        <div class="taskbox">
+          <div class="trow"><input id="newtask" placeholder="Add a task - Muse tracks it to done..." maxlength="280"><button class="btn" id="addtaskbtn">Add task</button></div>
+          <div id="tasklist"></div>
+          <div id="remlist"></div>
+        </div>
+        <div class="goalgrid" id="goalgrid"></div>
+      </div>
     </section>
 
     <!-- MEMORY -->
     <section class="view" id="view-memory">
-      <div class="viewhead"><h2>Memory</h2><span class="sub">What Muse has learned from your conversations. Forget anything, any time.</span>
+      <div class="viewhead"><h2>Memory</h2><span class="sub">Muse's context filesystem (vm://memory/...): durable personal facts in your encrypted VM - deduplicated, revised in place, retrieved by relevance (similarity x recency x usage), temporary facts expire on their own. Edit or forget anything, any time.</span>
         <span style="flex:1"></span><button class="btn badb" id="wipemembtn">Forget everything</button></div>
       <div class="viewbody" id="memlist"></div>
     </section>
 
     <!-- CONNECTORS -->
+    <section class="view" id="view-tools">
+      <div class="viewhead"><div><h2>Tools &amp; skills</h2><div class="sub">What Muse can genuinely do from this browser - each tool labeled: real, sandboxed, key needed, or open-network.</div></div></div>
+      <div class="viewbody">
+        <div class="toolgrid" id="toolgrid"></div>
+        <div class="trow" style="margin-bottom:8px"><button class="btn" id="buildtoolbtn">+ Have Muse build a tool</button>
+          <span class="small" style="color:var(--dim2);font-size:12px">Muse writes the code, gates it, sandbox-tests it - you approve before it joins the registry.</span></div>
+        <div class="tsec">
+          <h3>Web search</h3>
+          <div class="small">Live search through your own key. TinyFish's key is free with no card and also powers page fetches; Tavily has a free monthly tier; Brave has a free credit tier. The key stays inside your VM.</div>
+          <div class="trow"><select id="searchpv"><option value="tinyfish">TinyFish - free key, no card</option><option value="tavily">Tavily</option><option value="brave">Brave</option></select>
+            <input type="password" id="searchkey" placeholder="search API key" autocomplete="off"><button class="btn" id="savesearch">Save</button></div>
+          <div class="small" id="searchstate"></div>
+        </div>
+        <div class="tsec">
+          <h3>Monid</h3>
+          <div class="small">Monid is a catalog of hundreds of live data endpoints - web search, scraping, enrichment, monitoring. Paste a key from app.monid.ai/access/api-keys. Honest limit: Monid's API only accepts browser calls from its own domains, so from this static page the calls are CORS-blocked until Monid opens that up - the tools say so rather than failing silently. Outside the browser, the Monid CLI works fine.</div>
+          <div class="trow"><input type="password" id="monidkey" placeholder="Monid API key" autocomplete="off"><button class="btn" id="savemonid">Save</button></div>
+          <div class="small" id="monidstate"></div>
+        </div>
+        <div class="tsec">
+          <h3>Skills</h3>
+          <div class="small">Skills teach Muse domain workflows - a name plus the instructions it should follow. Built-ins can be toggled; yours can be deleted.</div>
+          <div id="skilllist"></div>
+          <button class="btn" id="addskillbtn">+ New skill</button>
+        </div>
+        <div class="tsec">
+          <h3>Open network mode</h3>
+          <div class="small">By default this VM only talks to your model and search providers. Open network mode lets Muse fetch arbitrary pages and reach MCP servers - it widens this tab's network policy until you turn it off. Off is the safer default.</div>
+          <label class="trow checkrow"><input type="checkbox" id="opennet"><span>Open network mode</span><span class="pill warn" id="opennetstate">off</span></label>
+        </div>
+        <div class="tsec">
+          <h3>MCP servers</h3>
+          <div class="small">Model Context Protocol servers over HTTP (streamable transport). Needs open network mode and a CORS-friendly remote server - stdio/local servers are unreachable from any web page, that is a hard browser limit, not a choice.</div>
+          <div id="mcplist"></div>
+          <button class="btn" id="addmcpbtn">+ Add MCP server</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- STUDIO -->
+    <section class="view" id="view-studio">
+      <div class="viewhead"><div><h2>Studio</h2><div class="sub">Mini-apps Muse builds for you, kept in your VM. Run them in an isolated sandbox frame, or download and open them anywhere.</div></div>
+        <span style="flex:1"></span><button class="btn pri" id="newappbtn">+ New app</button></div>
+      <div class="viewbody"><div id="applist"></div></div>
+    </section>
+
+    <!-- PERMISSIONS -->
     <section class="view" id="view-connectors">
       <div class="viewhead"><h2>Permissions</h2><span class="sub">You decide what Muse may touch, and how much. Change or revoke any time. Scopes gate what Muse is allowed to plan and draft.</span></div>
       <div class="viewbody" id="connlist"></div>
@@ -206,19 +136,58 @@ aside.rail.open{display:flex;position:fixed;left:0;top:0;bottom:0;width:min(300p
     <!-- AUDIT -->
     <section class="view" id="view-audit">
       <div class="viewhead"><h2>Audit trail</h2><span class="sub">Everything Muse has done and plans to do. Complete, inspectable, yours.</span></div>
-      <div class="viewbody"><div id="auditlog"></div></div>
+      <div class="viewbody"><div id="worklog"></div><div id="auditlog"></div></div>
     </section>
 
     <!-- SETTINGS -->
+    <section class="view" id="view-evolve">
+      <div class="viewhead"><div><h2>Evolve</h2>
+        <div class="sub">Recursive self-improvement - Muse drafts a proposal, hard gates evaluate it, you approve or reject. A static page cannot rewrite its own code, so an approved proposal exports as a patch bundle or hands off to Instinct. It never self-applies.</div></div></div>
+      <div class="viewbody">
+        <div class="evobox">
+          <textarea id="evoask" placeholder="What should Muse improve about itself? (blank = Muse picks the highest-value fix)" rows="2"></textarea>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn pri" id="evodraft">Draft proposal</button>
+            <button class="btn" id="evoself">Run self-tests</button>
+          </div>
+          <div class="small" id="evohint" style="font-size:11.5px;color:var(--dim2)"></div>
+        </div>
+        <div id="evolist"></div>
+      </div>
+    </section>
+
     <section class="view" id="view-settings">
       <div class="viewhead"><h2>Settings</h2><span class="sub">Model, key storage and your Personal VM.</span></div>
       <div class="viewbody" style="max-width:640px">
-        <div class="field"><label>OpenRouter API key (stored locally only, never sent anywhere except openrouter.ai)</label>
-          <input type="password" id="setkey" placeholder="sk-or-..."></div>
+        <div class="field"><label>Model provider</label>
+          <select id="setprovider">
+            <option value="openrouter">OpenRouter</option>
+            <option value="tokenharbor">Token Harbor</option>
+          </select></div>
+        <div class="field"><label id="keylabel">API key (stored in this browser only, sent only to your provider)</label>
+          <input type="password" id="setkey" autocomplete="off" placeholder="sk-or-...">
+          <div class="small" id="keyhint" style="font-size:11.5px;color:var(--dim2);margin-top:4px"></div></div>
+        <div class="field" style="display:flex;gap:9px;align-items:center">
+          <input type="checkbox" id="setsavekey" style="width:auto">
+          <label for="setsavekey" style="margin:0;display:inline;font-size:13px">Remember key on this device (kept inside your Personal VM - encrypted when a passphrase is set)</label></div>
         <div class="field"><label>Model</label>
-          <input type="text" id="setmodel" placeholder="openai/gpt-4o-mini"></div>
+          <div style="display:flex;gap:8px">
+            <select id="setmodel" style="flex:1"></select>
+            <button class="btn" id="refreshmodels" title="Reload the provider catalog">↻</button>
+          </div>
+          <div class="small" id="modelhint" style="font-size:11.5px;color:var(--dim2);margin-top:4px"></div></div>
         <div class="field"><label>Personal VM passphrase (optional - encrypts local storage with a key only you hold)</label>
-          <input type="password" id="setpass" placeholder="leave blank to keep storage unencrypted"></div>
+          <input type="password" id="setpass" autocomplete="new-password" placeholder="leave blank to keep storage unencrypted"></div>
+        <div class="field"><label>Appearance</label>
+          <div class="themerow" id="themerow">
+            <button class="swatch" data-theme-pick="serious" title="Serious (default)" style="background:#15181e"></button>
+            <button class="swatch" data-theme-pick="violet" title="Violet" style="background:#1a2132"></button>
+            <button class="swatch" data-theme-pick="ember" title="Ember" style="background:#241c1a"></button>
+            <button class="swatch" data-theme-pick="paper" title="Paper (light)" style="background:#f5f4f1"></button>
+            <select id="setdensity" style="width:auto"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select>
+            <select id="setfont" style="width:auto"><option value="m">Font M</option><option value="s">Font S</option><option value="l">Font L</option></select>
+          </div></div>
+        <div class="field"><label>Compatibility</label><div class="compat" id="compatlist"></div></div>
         <div class="row" style="display:flex;gap:9px">
           <button class="btn pri" id="savesettings">Save settings</button>
           <button class="btn" id="exportbtn">Export my data</button>
@@ -229,15 +198,21 @@ aside.rail.open{display:flex;position:fixed;left:0;top:0;bottom:0;width:min(300p
     </section>
   </main>
 
-  <aside class="dock">
-    <header><h3><span class="dot" style="width:9px;height:9px;border-radius:50%;background:var(--acc2);display:inline-block"></span>Agent status</h3></header>
+  <aside class="dock" id="dock">
+    <header><h3><span id="st-dot"></span><span id="st-title">Agent status</span></h3><button class="docktoggle" id="docktoggle" title="Collapse panel" aria-label="Collapse panel">&rsaquo;</button></header>
+    <section class="live" id="st-live" hidden>
+      <div class="lbl">Working</div>
+      <div class="livestep" id="st-step"></div>
+      <div class="livetool" id="st-tool" hidden><span class="spin"></span><span id="st-toolname"></span></div>
+      <div id="st-team" hidden></div>
+    </section>
     <section>
       <div class="lbl">Now</div>
-      <div class="kv"><span>State</span><b id="st-state">idle</b></div>
-      <div class="kv"><span>Model</span><b id="st-model">-</b></div>
-      <div class="kv"><span>Key</span><b id="st-key">not set</b></div>
-      <div class="kv"><span>Actions taken</span><b id="st-actions">0</b></div>
+      <div class="kv"><span>Model</span><b id="st-model" title="">-</b></div>
+      <div class="kv"><span>Key</span><b id="st-key">none yet</b></div>
+      <div class="kv"><span>Actions</span><b id="st-actions">0</b></div>
       <div class="kv"><span>Awaiting approval</span><b id="st-pending">0</b></div>
+      <div class="kv" id="st-lastrow" hidden><span>Last</span><b id="st-last" title=""></b></div>
     </section>
     <section style="flex:1">
       <div class="lbl">Work queue</div>
@@ -245,548 +220,15 @@ aside.rail.open{display:flex;position:fixed;left:0;top:0;bottom:0;width:min(300p
     </section>
     <section>
       <div class="lbl">Sentinel</div>
-      <div style="font-size:12px;color:var(--dim)">Every planned action passes a policy check before it runs. Sensitive actions - sending, sharing, spending - always pause for your explicit approval.</div>
+      <div style="font-size:12px;color:var(--dim)">Sensitive actions - sending, sharing, spending - always pause for your explicit approval.</div>
     </section>
+    <div class="dock-mini"><span id="st-dot2"></span><span class="minibadge" id="st-minipending" hidden>0</span></div>
   </aside>
 </div>
 
 <!-- modal -->
 <div id="modalwrap"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
-<script>
-"use strict";
-/* =====================================================================
-   OPEN MUSE - an open-source, local-first personal agent.
-   Original implementation. Everything runs in this browser.
-   ===================================================================== */
-
-const $ = s => document.querySelector(s);
-const $$ = s => [...document.querySelectorAll(s)];
-const nowISO = () => new Date().toISOString();
-const uid = p => (p||"id") + "-" + Math.random().toString(36).slice(2,9) + Date.now().toString(36).slice(-4);
-
-/* ---------------- store (Personal VM) ----------------
-   Plain mode: JSON in localStorage.
-   Locked mode: AES-GCM(PBKDF2(passphrase)) - the key never leaves the page. */
-const Store = {
-  raw: null,          // decrypted object while unlocked
-  locked: false,
-  passKey: null,      // CryptoKey while session unlocked
-  KEY: "openmuse.store.v1",
-  default(){
-    return {
-      settings: { model: "openai/gpt-4o-mini", hasKey: false },
-      chat: [],          // {role, text, ts, kind}
-      goals: [],         // {id,title,created,plan:{steps:[]},status}
-      memory: [],        // {id,text,ts,source}
-      audit: [],         // {ts,kind,text}
-      connectors: [      // local permission model (scopes gate what Muse may plan)
-        {id:"email",  name:"Email",    glyph:"✉", desc:"Read and draft email",            scope:"off"},
-        {id:"cal",    name:"Calendar", glyph:"◷", desc:"See availability, draft events",  scope:"off"},
-        {id:"files",  name:"Files",    glyph:"▤", desc:"Read documents you point it at",  scope:"off"},
-        {id:"web",    name:"Web",      glyph:"◎", desc:"Look things up while planning",   scope:"off"},
-        {id:"pay",    name:"Payments", glyph:"◈", desc:"Prepare checkouts (always needs approval)", scope:"off"},
-      ],
-      counters: { actions: 0 },
-      suggestions: [],
-    };
-  },
-  async deriveKey(pass, salt){
-    const enc = new TextEncoder();
-    const base = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
-    return crypto.subtle.deriveKey({name:"PBKDF2", salt, iterations:210000, hash:"SHA-256"}, base, {name:"AES-GCM", length:256}, false, ["encrypt","decrypt"]);
-  },
-  async load(){
-    const blob = localStorage.getItem(this.KEY);
-    if(!blob){ this.raw = this.default(); return; }
-    const parsed = JSON.parse(blob);
-    if(parsed.enc){
-      this.locked = true; this.raw = null; this._cipher = parsed;   // needs passphrase
-    } else {
-      this.raw = Object.assign(this.default(), parsed);
-    }
-  },
-  async save(){
-    if(this.locked && this.passKey){
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      const salt = this._cipher ? Uint8Array.from(atob(this._cipher.salt), c=>c.charCodeAt(0)) : crypto.getRandomValues(new Uint8Array(16));
-      const data = new TextEncoder().encode(JSON.stringify(this.raw));
-      const ct = await crypto.subtle.encrypt({name:"AES-GCM", iv}, this.passKey, data);
-      const b64 = buf => { const a=new Uint8Array(buf); let s=""; for(let i=0;i<a.length;i+=0x8000) s+=String.fromCharCode(...a.subarray(i,i+0x8000)); return btoa(s); };
-      this._cipher = {enc:1, v:1, salt:b64(salt), iv:b64(iv), data:b64(ct)};
-      localStorage.setItem(this.KEY, JSON.stringify(this._cipher));
-    } else if(!this.locked){
-      localStorage.setItem(this.KEY, JSON.stringify(this.raw));
-    }
-  },
-  async lock(pass){
-    const salt = crypto.getRandomValues(new Uint8Array(16));
-    // stash the salt first so save() encrypts with the SAME key it stores
-    this._cipher = {enc:1, v:1, salt: btoa(String.fromCharCode(...salt)), iv:"", data:""};
-    this.passKey = await this.deriveKey(pass, salt);
-    this.locked = true;
-    await this.save();
-  },
-  async unlock(pass){
-    const salt = Uint8Array.from(atob(this._cipher.salt), c=>c.charCodeAt(0));
-    const key = await this.deriveKey(pass, salt);
-    const iv = Uint8Array.from(atob(this._cipher.iv), c=>c.charCodeAt(0));
-    const data = Uint8Array.from(atob(this._cipher.data), c=>c.charCodeAt(0));
-    const pt = await crypto.subtle.decrypt({name:"AES-GCM", iv}, key, data);
-    this.raw = Object.assign(this.default(), JSON.parse(new TextDecoder().decode(pt)));
-    this.passKey = key;
-    return true;
-  },
-  wipe(){ localStorage.removeItem(this.KEY); }
-};
-const S = () => Store.raw;
-
-/* ---------------- audit ---------------- */
-async function audit(kind, text){
-  S().audit.unshift({ts: nowISO(), kind, text});
-  if(S().audit.length > 500) S().audit.length = 500;
-  if(kind === "action") S().counters.actions++;
-  await Store.save();
-  renderAudit(); renderStatus();
-}
-
-/* ---------------- ui helpers ---------------- */
-function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("on"); clearTimeout(t._x); t._x=setTimeout(()=>t.classList.remove("on"),2600); }
-function openModal(html){ const m=$("#modal"); m.innerHTML=html; $("#modalwrap").classList.add("on"); }
-function closeModal(){ $("#modalwrap").classList.remove("on"); }
-$("#modalwrap").addEventListener("click", e=>{ if(e.target.id==="modalwrap") closeModal(); });
-const esc = s => s.replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-
-/* navigation */
-$$(".navbtn").forEach(b => b.addEventListener("click", () => {
-  $$(".navbtn").forEach(x=>x.classList.toggle("on", x===b));
-  $$(".view").forEach(v=>v.classList.toggle("on", v.id==="view-"+b.dataset.view));
-  $("#rail").classList.remove("open"); $("#railbackdrop").style.display="none";
-}));
-$("#menubtn").addEventListener("click", ()=>{ const r=$("#rail"); r.classList.toggle("open"); $("#railbackdrop").style.display = r.classList.contains("open") ? "block" : "none"; });
-$("#railbackdrop").addEventListener("click", ()=>{ $("#rail").classList.remove("open"); $("#railbackdrop").style.display="none"; });
-
-/* ---------------- status / queue ---------------- */
-function renderStatus(){
-  const s=S(); if(!s) return;
-  $("#st-model").textContent = s.settings.model || "-";
-  $("#st-key").textContent = sessionStorage.getItem("openmuse.key") ? "set (session)" : (s.settings.hasKey ? "set (saved)" : "not set");
-  $("#st-actions").textContent = s.counters.actions;
-  const pending = s.goals.flatMap(g=>g.plan.steps).filter(x=>x.status==="approval").length;
-  $("#st-pending").textContent = pending;
-  $("#memcount").textContent = s.memory.length;
-  const q = $("#queue");
-  const items = s.goals.flatMap(g=>g.plan.steps.filter(x=>x.status!=="done").map(x=>({g,x})));
-  q.innerHTML = items.length ? items.slice(0,8).map(({g,x}) =>
-    `<div class="queue-item">${esc(x.title)}<div class="w">${esc(g.title)} · ${x.status}${x.kind!=="agent"?" · "+x.kind:""}</div></div>`).join("")
-    : `<div class="empty" style="padding:14px">Queue is empty.<br>Set a goal and Muse starts planning.</div>`;
-}
-
-/* ---------------- renders ---------------- */
-function renderAudit(){
-  const s=S(); if(!s) return;
-  $("#auditlog").innerHTML = s.audit.length ? s.audit.map(a =>
-    `<div class="auline"><span class="t">${a.ts.slice(0,19).replace("T"," ")}</span><span class="k">${esc(a.kind)}</span><span>${esc(a.text)}</span></div>`).join("")
-    : `<div class="empty">Nothing yet. Every action Muse takes will be recorded here.</div>`;
-}
-function renderMemory(){
-  const s=S(); if(!s) return;
-  $("#memlist").innerHTML = s.memory.length ? s.memory.map(m =>
-    `<div class="memitem"><div class="txt">${esc(m.text)}<div class="when">learned ${m.ts.slice(0,10)} · ${esc(m.source||"conversation")}</div></div>
-     <button class="iconbtn" data-forget="${m.id}" title="Forget this">✕</button></div>`).join("")
-    : `<div class="empty">Muse has not learned anything yet. Talk to it - it remembers what matters, and you can make it forget.</div>`;
-  $$("#memlist [data-forget]").forEach(b => b.addEventListener("click", async () => {
-    const id=b.dataset.forget; const i=S().memory.findIndex(m=>m.id===id);
-    if(i>=0){ const [gone]=S().memory.splice(i,1); await audit("memory", `Forgot: "${gone.text}"`); await Store.save(); renderMemory(); renderStatus(); toast("Forgotten."); }
-  }));
-}
-function renderConnectors(){
-  const s=S(); if(!s) return;
-  $("#connlist").innerHTML = s.connectors.map(c =>
-    `<div class="conn"><div class="glyph">${c.glyph}</div>
-      <div class="inf"><b>${esc(c.name)}</b><p>${esc(c.desc)}</p></div>
-      <div class="seg" data-conn="${c.id}">
-        ${["off","read","read+write"].map(v=>`<button data-v="${v}" class="${c.scope===v?"on":""}">${v}</button>`).join("")}
-      </div></div>`).join("");
-  $$("#connlist .seg button").forEach(b => b.addEventListener("click", async () => {
-    const seg=b.parentElement; const c=S().connectors.find(x=>x.id===seg.dataset.conn);
-    c.scope=b.dataset.v; await audit("permission", `${c.name} permission set to "${c.scope}"`);
-    await Store.save(); renderConnectors();
-  }));
-}
-function renderGoals(){
-  const s=S(); if(!s) return;
-  const grid=$("#goalgrid");
-  if(!s.goals.length){ grid.innerHTML=`<div class="empty" style="grid-column:1/-1">No goals yet. Tell Muse a goal in chat - "my goal is to..." - or use + New goal.</div>`; return; }
-  grid.innerHTML = s.goals.map(g => {
-    const done=g.plan.steps.filter(x=>x.status==="done").length;
-    const pct=Math.round(100*done/g.plan.steps.length);
-    return `<div class="goal" data-goal="${g.id}">
-      <h3>${esc(g.title)}</h3>
-      <div class="progbar"><i style="width:${pct}%"></i></div>
-      <div class="small" style="font-size:11.5px;color:var(--dim)">${done}/${g.plan.steps.length} steps · ${g.status}</div>
-      <div class="steps">${g.plan.steps.map(x=>{
-        const ic = x.status==="done"?"✓":x.status==="approval"?"⏸":x.status==="doing"?"…":x.kind==="user"?"◌":"·";
-        return `<div class="step ${x.status}"><span class="ic">${ic}</span><span class="st-t">${esc(x.title)}</span><span class="tag">${x.kind}</span></div>`;
-      }).join("")}</div>
-      <div class="row">
-        <button class="btn pri" data-advance="${g.id}" ${g.status==="done"?"disabled":""}>${g.status==="done"?"Complete":"Advance"}</button>
-        <button class="btn" data-discuss="${g.id}">Discuss</button>
-        <button class="btn badb" data-delgoal="${g.id}">Drop</button>
-      </div></div>`;
-  }).join("");
-  $$("[data-advance]").forEach(b=>b.addEventListener("click",()=>advanceGoal(b.dataset.advance)));
-  $$("[data-discuss]").forEach(b=>b.addEventListener("click",g=>{ switchView("chat"); const goal=S().goals.find(x=>x.id===g.target.dataset.discuss); if(goal){ $("#chatinput").value=`About my goal "${goal.title}": `; $("#chatinput").focus(); } }));
-  $$("[data-delgoal]").forEach(b=>b.addEventListener("click", async ()=>{ const id=b.dataset.delgoal; const i=S().goals.findIndex(x=>x.id===id); if(i>=0){ await audit("goal",`Dropped goal "${S().goals[i].title}"`); S().goals.splice(i,1); await Store.save(); renderGoals(); renderStatus(); } }));
-}
-function switchView(name){ $$(".navbtn").forEach(x=>x.classList.toggle("on", x.dataset.view===name)); $$(".view").forEach(v=>v.classList.toggle("on", v.id==="view-"+name)); }
-function renderAll(){ renderGoals(); renderMemory(); renderConnectors(); renderAudit(); renderStatus(); renderChat(); }
-
-/* ---------------- chat ---------------- */
-function addMsg(role, text, kind){
-  const s=S();
-  s.chat.push({role, text, ts: nowISO(), kind: kind||""});
-  if(s.chat.length>400) s.chat.splice(0, s.chat.length-400);
-  return Store.save();
-}
-function renderChat(){
-  const s=S(); if(!s) return;
-  const log=$("#chatlog");
-  log.innerHTML = s.chat.map(m => {
-    if(m.kind==="card") return m.text;   // pre-rendered card html (approval/suggestion cards render live below)
-    const cls = m.role==="user" ? "user" : m.role==="sys" ? "sys" : "muse";
-    const body = m.role==="muse" ? mdLite(m.text) : esc(m.text);
-    return `<div class="msg ${cls}"><div class="body">${body}</div><div class="meta">${m.ts.slice(11,16)}</div></div>`;
-  }).join("");
-  // live approval cards
-  s.goals.forEach(g => g.plan.steps.forEach(x => {
-    if(x.status==="approval" && !document.getElementById("ap-"+x.id)){
-      const c=document.createElement("div"); c.className="card"; c.id="ap-"+x.id;
-      c.innerHTML=`<h4>⏸ Approval needed</h4><div class="small"><b>${esc(x.title)}</b> - part of goal “${esc(g.title)}”. Sentinel policy: sensitive actions always wait for you.</div>
-        <div class="row"><button class="btn okb" data-approve="${g.id}|${x.id}">Approve &amp; run</button>
-        <button class="btn badb" data-reject="${g.id}|${x.id}">Reject</button></div>`;
-      log.appendChild(c);
-    }
-  }));
-  $$("#chatlog [data-approve]").forEach(b=>b.onclick=()=>decideStep(b.dataset.approve,true));
-  $$("#chatlog [data-reject]").forEach(b=>b.onclick=()=>decideStep(b.dataset.reject,false));
-  log.scrollTop = log.scrollHeight;
-}
-function mdLite(t){
-  return esc(t).replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>").replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\n/g,"<br>");
-}
-
-/* ---------------- model ---------------- */
-function getKey(){ return sessionStorage.getItem("openmuse.key") || ""; }
-async function chatStream(messages, onTok){
-  const key=getKey();
-  if(!key) throw new Error("no-key");
-  const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method:"POST",
-    headers:{ "Authorization":"Bearer "+key, "Content-Type":"application/json" },
-    body: JSON.stringify({ model: S().settings.model, messages, stream:true, temperature:0.7 })
-  });
-  if(!r.ok){ const t=await r.text(); throw new Error("model "+r.status+": "+t.slice(0,160)); }
-  const rd=r.body.getReader(); const dec=new TextDecoder(); let buf="", out="";
-  for(;;){
-    const {done,value}=await rd.read(); if(done) break;
-    buf+=dec.decode(value,{stream:true});
-    let i; while((i=buf.indexOf("\n"))>=0){
-      const line=buf.slice(0,i).trim(); buf=buf.slice(i+1);
-      if(!line.startsWith("data:")) continue;
-      const d=line.slice(5).trim(); if(d==="[DONE]") return out;
-      try{ const tok=JSON.parse(d).choices?.[0]?.delta?.content || ""; if(tok){ out+=tok; onTok && onTok(out); } }catch(e){}
-    }
-  }
-  return out;
-}
-async function chatOnce(messages, json){
-  const key=getKey(); if(!key) throw new Error("no-key");
-  const body={ model:S().settings.model, messages, temperature:0.3 };
-  if(json) body.response_format={type:"json_object"};
-  const r=await fetch("https://openrouter.ai/api/v1/chat/completions",{method:"POST",headers:{"Authorization":"Bearer "+key,"Content-Type":"application/json"},body:JSON.stringify(body)});
-  if(!r.ok) throw new Error("model "+r.status);
-  return (await r.json()).choices[0].message.content;
-}
-
-/* system prompt: persona + memory + permissions */
-function systemPrompt(){
-  const s=S();
-  const mem = s.memory.slice(0,25).map(m=>"- "+m.text).join("\n") || "(nothing learned yet)";
-  const perms = s.connectors.map(c=>`${c.name}: ${c.scope}`).join(", ");
-  return `You are Muse, the personal agent inside Open Muse - an open-source, local-first personal agent. You behave like a capable, warm, concise assistant that DOES work, not just chats.
-Style: talk like a person in a messaging app. Short paragraphs, no headers, no bullet spam unless listing steps. Plain and direct.
-What you can do in this environment: chat, build and advance goal plans, remember facts, draft things (emails, messages, documents, checklists, plans), and prepare actions. You cannot reach the internet or real accounts directly - the Permissions panel grants scopes, and drafts are as far as anything external goes without the user doing the send.
-Current permissions: ${perms}.
-Rules:
-- If the user states a goal, say you will plan it (the app builds the plan).
-- Never claim to have sent, bought, booked or changed anything external. You draft and prepare; the user approves and executes outside.
-- Keep replies under ~120 words unless the user asks for depth.
-What you remember about the user:
-${mem}`;
-}
-
-/* ---------------- sentinel policy ---------------- */
-const SENSITIVE = /\b(send|email|message|share|post|publish|buy|purchase|pay|book|order|invite|transfer|delete|schedule)\b/i;
-function sentinelCheck(step){
-  return { sensitive: SENSITIVE.test(step.title) };
-}
-
-/* ---------------- goals engine ---------------- */
-async function createGoal(title){
-  const s=S();
-  const g={id:uid("goal"), title, created:nowISO(), status:"planning", plan:{steps:[]}};
-  s.goals.unshift(g); renderGoals(); renderStatus();
-  await audit("goal", `Goal accepted: "${title}" - planning`);
-  try{
-    const raw = await chatOnce([
-      {role:"system", content:`You are the planning core of a personal agent. Break the user's goal into 4-7 concrete steps. Output JSON only: {"steps":[{"title":"...","kind":"agent"|"user"}]}. kind "agent" = the agent can do it in chat (research, drafting, writing, planning, analysis). kind "user" = requires the human in the real world. Steps that send/share/buy/book anything must be phrased as drafts or preparations, since a human always does the final external act.`},
-      {role:"user", content:`Goal: ${title}`}
-    ], true);
-    const plan=JSON.parse(raw);
-    g.plan.steps=(plan.steps||[]).slice(0,8).map(x=>({id:uid("step"), title:String(x.title||"step"), kind:x.kind==="user"?"user":"agent", status:"todo", output:""}));
-    g.status="active";
-    await audit("plan", `Plan ready for "${title}": ${g.plan.steps.length} steps`);
-    await Store.save(); renderGoals(); renderStatus();
-    return g;
-  }catch(e){
-    g.status="active";
-    g.plan.steps=[{id:uid("step"),title:"Define the first concrete move for: "+title,kind:"agent",status:"todo",output:""}];
-    await audit("plan", `Planning fell back to a seed step for "${title}" (${e.message})`);
-    await Store.save(); renderGoals(); renderStatus();
-    return g;
-  }
-}
-
-async function advanceGoal(id){
-  const s=S(); const g=s.goals.find(x=>x.id===id); if(!g) return;
-  const step=g.plan.steps.find(x=>x.status==="todo"||x.status==="approval");
-  if(!step){ g.status="done"; await audit("goal",`Goal complete: "${g.title}"`); await Store.save(); renderGoals(); renderStatus(); toast("Goal complete."); return; }
-  if(step.kind==="user"){
-    await audit("plan",`Step needs the human: "${step.title}"`);
-    step.status="done"; g.status = g.plan.steps.every(x=>x.status==="done")?"done":"active";
-    await addMsg("muse", `I marked “${step.title}” on “${g.title}” as handled - that one was yours to do in the world. Say the word if it isn't actually done and I'll reopen it.`);
-    await Store.save(); renderAll(); return;
-  }
-  const check=sentinelCheck(step);
-  if(check.sensitive && step.status!=="approval"){
-    step.status="approval";
-    await audit("sentinel",`Paused "${step.title}" - sensitive action, needs approval`);
-    await addMsg("sys",`Sentinel paused a step on “${g.title}”.`);
-    await Store.save(); renderAll(); return;
-  }
-  await runStep(g, step);
-}
-
-async function runStep(g, step){
-  const prior = g.plan.steps.filter(x=>x.status==="done"&&x.output).map(x=>`Earlier step "${x.title}" produced:\n${x.output.slice(0,900)}`).join("\n\n");
-  step.status="doing"; renderGoals(); renderStatus();
-  $("#st-state").textContent="working: "+step.title.slice(0,40);
-  await audit("action",`Running step: "${step.title}" (goal: "${g.title}")`);
-  try{
-    const out = await chatOnce([
-      {role:"system", content: systemPrompt()},
-      {role:"user", content:`Execute this step of my goal and give me the finished work product, not a description of what you would do. Never say you cannot - produce the best possible artifact with what you know.\nGoal: ${g.title}\nStep: ${step.title}\n${prior}\nProduce the actual artifact (draft text, plan, analysis, checklist, etc).`}
-    ]);
-    step.output=out; step.status="done";
-    await addMsg("muse", `Done with “${step.title}” (${g.title}):\n\n${out.slice(0,1800)}`);
-    await audit("action",`Completed step: "${step.title}"`);
-  }catch(e){
-    step.status="todo";
-    await addMsg("sys", `Step “${step.title}” hit a problem: ${e.message==="no-key"?"no model key set - add it in Settings":e.message}`);
-    await audit("error",`Step failed: "${step.title}" (${e.message})`);
-  }
-  g.status = g.plan.steps.every(x=>x.status==="done") ? "done" : "active";
-  $("#st-state").textContent="idle";
-  await Store.save(); renderAll();
-}
-
-async function decideStep(pair, ok){
-  const [gid,sid]=pair.split("|");
-  const g=S().goals.find(x=>x.id===gid); const st=g&&g.plan.steps.find(x=>x.id===sid); if(!st) return;
-  const card=$("#ap-"+sid); if(card) card.remove();
-  if(ok){
-    await audit("approval",`Approved: "${st.title}"`);
-    await runStep(g, st);
-  } else {
-    st.status="done"; st.output="Rejected by user.";
-    await audit("approval",`Rejected: "${st.title}"`);
-    await addMsg("sys",`You rejected “${st.title}”. Muse will skip it.`);
-    g.status = g.plan.steps.every(x=>x.status==="done") ? "done" : "active";
-    await Store.save(); renderAll();
-  }
-}
-
-/* ---------------- chat flow ---------------- */
-const GOAL_RE = /\b(my goal is|goal:|set a goal|new goal|i want to (?:learn|run|build|write|launch|save|get|become|finish)|help me (?:plan|prepare|get|learn|build|write|launch|email|send|draft|negotiate|make|create|organize|apply))\b/i;
-
-async function sendChat(){
-  const ta=$("#chatinput"); const text=ta.value.trim(); if(!text) return;
-  ta.value=""; ta.style.height="auto";
-  await addMsg("user", text); renderChat();
-
-  // forget command handled locally, instantly
-  const fm = text.match(/^forget (?:that |about )?(.+)/i);
-  if(fm){
-    const q=fm[1].toLowerCase().trim();
-    const hits=S().memory.filter(m=>m.text.toLowerCase().includes(q.slice(0,24)) || q.split(/\s+/).some(w=>w.length>3 && m.text.toLowerCase().includes(w)));
-    if(hits.length){
-      S().memory=S().memory.filter(m=>!hits.includes(m));
-      for(const h of hits) await audit("memory",`Forgot on request: "${h.text}"`);
-      await addMsg("muse", `Forgotten. ${hits.length===1?"That memory is":"Those "+hits.length+" memories are"} gone for good.`);
-    } else {
-      await addMsg("muse", `I don't hold anything matching that. The Memory view shows everything I know - it's a short list, you can check.`);
-    }
-    await Store.save(); renderAll(); return;
-  }
-
-  // goal intent
-  if(GOAL_RE.test(text)){
-    const title=text.replace(/^(my goal is to|my goal is|goal:|set a goal( to)?|new goal( is)?( to)?)\s*/i,"").trim().replace(/[.!\s]+$/,"");
-    const nice=title.charAt(0).toUpperCase()+title.slice(1);
-    await addMsg("muse", `On it. I'm turning “${nice}” into a plan - give me a few seconds.`);
-    renderChat();
-    learnFrom(text).catch(async e=>audit("error","memory extraction failed: "+String(e).slice(0,120)));
-    const g=await createGoal(nice);
-    await addMsg("muse", `Plan is ready: ${g.plan.steps.length} steps. It's on the Goals board - I'll advance it step by step, and anything sensitive pauses for your approval first. Say "advance" or press Advance over there.`);
-    await Store.save(); renderAll(); switchView("goals"); return;
-  }
-  if(/^(advance|continue|keep going|next step)\b/i.test(text)){
-    const g=S().goals.find(x=>x.status==="active");
-    if(g){ await advanceGoal(g.id); } else await addMsg("muse","No active goal right now. Give me one and I'll get moving.");
-    await Store.save(); renderAll(); return;
-  }
-
-  // ordinary chat with streaming
-  const log=$("#chatlog");
-  const el=document.createElement("div"); el.className="msg muse";
-  el.innerHTML=`<div class="body"><span class="typing"><i></i><i></i><i></i></span></div>`;
-  log.appendChild(el); log.scrollTop=log.scrollHeight;
-  $("#st-state").textContent="replying";
-  const hist=S().chat.slice(-14).filter(m=>m.role!=="sys"&&!m.kind).map(m=>({role:m.role==="muse"?"assistant":m.role, content:m.text}));
-  try{
-    const out=await chatStream([{role:"system",content:systemPrompt()}, ...hist], partial=>{ el.querySelector(".body").innerHTML=mdLite(partial); log.scrollTop=log.scrollHeight; });
-    el.remove();
-    await addMsg("muse", out); renderChat();
-    learnFrom(text).catch(async e=>audit("error","memory extraction failed: "+String(e).slice(0,120)));
-  }catch(e){
-    el.remove();
-    if(e.message==="no-key"){
-      await addMsg("sys","No model key set. Open Muse is BYO-key: paste an OpenRouter key in Settings - it stays in this browser.");
-    } else {
-      await addMsg("sys","Model call failed: "+e.message.slice(0,140));
-    }
-    renderChat();
-  }
-  $("#st-state").textContent="idle";
-  await Store.save(); renderStatus();
-}
-
-/* memory extraction: small background call, durable facts only */
-async function learnFrom(userText){
-  if(!getKey()) return;
-  const raw=await chatOnce([
-    {role:"system",content:`Extract durable personal facts worth remembering from the user's message (preferences, relationships, constraints, projects, goals). Output JSON: {"facts":["...",...]}. Facts must be third-person, specific, and useful later ("User is training for a 10k"). Skip transient chatter, questions, and anything already implied. Empty list if nothing durable.`},
-    {role:"user",content:userText}
-  ], true);
-  const facts=(JSON.parse(raw).facts||[]).slice(0,3);
-  for(const f of facts){
-    const t=String(f).trim(); if(t.length<8) continue;
-    if(S().memory.some(m=>m.text.toLowerCase()===t.toLowerCase())) continue;
-    S().memory.unshift({id:uid("mem"), text:t, ts:nowISO(), source:"conversation"});
-    await audit("memory",`Learned: "${t}"`);
-  }
-  if(facts.length){ await Store.save(); renderMemory(); renderStatus(); }
-}
-
-/* proactive suggestion: on load + every 10 min while open */
-async function proactiveNudge(){
-  if(!getKey() || !S()) return;
-  const active=S().goals.find(g=>g.status==="active");
-  const pending=S().goals.flatMap(g=>g.plan.steps).filter(x=>x.status==="approval").length;
-  if(pending>0){
-    if(sessionStorage.getItem("openmuse.nudged")!==String(pending)){
-      sessionStorage.setItem("openmuse.nudged", String(pending));
-      await addMsg("sys",`${pending} action${pending>1?"s are":" is"} waiting for your approval below.`);
-      await Store.save(); renderChat();
-    }
-    return;
-  }
-  sessionStorage.removeItem("openmuse.nudged");
-  if(active){
-    const step=active.plan.steps.find(x=>x.status==="todo");
-    if(step){
-      const c=document.createElement("div"); c.className="suggest";
-      c.innerHTML=`<div class="s-t"><b>Muse, unprompted:</b> “${esc(active.title)}” is mid-plan. Next up is “${esc(step.title)}”. Want me to take it?</div><button class="btn pri" id="sug-go">Yes, go</button>`;
-      $("#chatlog").appendChild(c); $("#chatlog").scrollTop=1e9;
-      c.querySelector("#sug-go").onclick=()=>{ c.remove(); advanceGoal(active.id); };
-    }
-  } else if(!S().goals.length && S().chat.length<4){
-    await addMsg("muse","One thing I'm good at: give me a goal, even a big one. I'll break it into a plan and start working through it with you.");
-    await Store.save(); renderChat();
-  }
-}
-
-/* ---------------- settings ---------------- */
-$("#savesettings").addEventListener("click", async ()=>{
-  const k=$("#setkey").value.trim(), m=$("#setmodel").value.trim(), p=$("#setpass").value;
-  if(k){ sessionStorage.setItem("openmuse.key", k); S().settings.hasKey=true; }
-  if(m) S().settings.model=m;
-  if(p){ await Store.lock(p); $("#vmstate").className="pill ok"; $("#vmstate").innerHTML='<span class="d"></span>encrypted'; $("#vmdesc").textContent="Store is AES-GCM encrypted with a key only your passphrase derives."; }
-  await Store.save(); renderStatus();
-  await audit("settings","Settings updated");
-  toast("Saved.");
-});
-$("#exportbtn").addEventListener("click", ()=>{
-  const blob=new Blob([JSON.stringify(S(),null,2)],{type:"application/json"});
-  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="open-muse-export.json"; a.click();
-});
-$("#wipeallbtn").addEventListener("click", async ()=>{
-  openModal(`<h3>Erase everything?</h3><div class="sub">Chat, goals, memory, audit and settings are wiped from this browser. There is no copy anywhere else - that is the point of Open Muse.</div>
-  <div class="row"><button class="btn" onclick="document.querySelector('#modalwrap').classList.remove('on')">Cancel</button><button class="btn badb" id="yeswipe">Erase</button></div>`);
-  $("#yeswipe").onclick=()=>{ Store.wipe(); sessionStorage.clear(); location.reload(); };
-});
-$("#wipemembtn").addEventListener("click", async ()=>{
-  S().memory=[]; await audit("memory","All memories forgotten on request"); await Store.save(); renderMemory(); renderStatus(); toast("All memories forgotten.");
-});
-$("#newgoalbtn").addEventListener("click", ()=>{
-  openModal(`<h3>New goal</h3><div class="sub">State it plainly. Muse will break it into steps and start advancing them.</div>
-  <div class="field"><input id="ngoal" placeholder="e.g. train for a 10k in 10 weeks"></div>
-  <div class="row"><button class="btn" onclick="document.querySelector('#modalwrap').classList.remove('on')">Cancel</button><button class="btn pri" id="gogoal">Plan it</button></div>`);
-  $("#gogoal").onclick=async ()=>{ const v=$("#ngoal").value.trim(); if(!v) return; closeModal(); await createGoal(v.charAt(0).toUpperCase()+v.slice(1)); };
-});
-
-/* composer */
-const ta=$("#chatinput");
-ta.addEventListener("input",()=>{ ta.style.height="auto"; ta.style.height=Math.min(ta.scrollHeight,160)+"px"; });
-ta.addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); sendChat(); } });
-$("#sendbtn").addEventListener("click", sendChat);
-
-/* ---------------- boot ---------------- */
-(async function boot(){
-  await Store.load();
-  if(Store.locked){
-    openModal(`<h3>Personal VM is locked</h3><div class="sub">This store is encrypted with your passphrase. Enter it to unlock.</div>
-      <div class="field"><input type="password" id="unlockpass" placeholder="passphrase"></div>
-      <div class="row"><button class="btn badb" id="wipeinstead">Erase and start fresh</button><button class="btn pri" id="unlockbtn">Unlock</button></div>`);
-    $("#unlockbtn").onclick=async ()=>{
-      try{ await Store.unlock($("#unlockpass").value); closeModal(); finishBoot(); }
-      catch(e){ toast("Wrong passphrase."); }
-    };
-    $("#wipeinstead").onclick=()=>{ Store.wipe(); location.reload(); };
-  } else finishBoot();
-})();
-async function finishBoot(){
-  renderAll();
-  $("#vmstate").innerHTML = Store.locked ? '<span class="d"></span>encrypted' : '<span class="d"></span>local';
-  if(!S().chat.length){
-    await addMsg("muse","Hi - I'm Muse. I run entirely in your browser: your goals, memory and plans live here, not on someone's server. Tell me what needs to get done, or give me a goal and I'll plan it and start working. First, drop an OpenRouter key in Settings so I can think.");
-    await addMsg("sys","Open Muse is open source. The agent is real - it thinks with your own model key - but it acts only inside this browser. External actions come back to you as drafts and preparations; the final send is always yours.");
-    await Store.save(); renderChat();
-  }
-  setTimeout(proactiveNudge, 2500);
-  setInterval(proactiveNudge, 10*60*1000);
-}
-</script>
+<script src="app.js"></script>
 </body>
 </html>
