@@ -781,7 +781,7 @@ async function decideStep(pair, ok){
 }
 
 /* ---------------- chat flow ---------------- */
-const GOAL_RE = /\b(my goal is|goal:|set a goal|new goal|i want to (?:learn|run|build|write|launch|save|get|become|finish)|help me (?:plan|prepare|get|learn|build|write|launch|email|send|draft|negotiate|make|create|organize|apply))\b/i;
+const GOAL_RE = /\b(my goal is|goal:|set a goal|new goal|i want to (?:learn|run|build|write|launch|save|get|become|finish)|help me (?:plan|prepare|get|learn|build|write|launch|email|send|draft|negotiate|make|create|organize|apply))(?=\W|$)/i;
 
 async function sendChat(){
   if(!S()){ showLockScreen("Locked - enter your passphrase to continue."); return; }
@@ -826,7 +826,7 @@ async function sendChat(){
 
   // goal intent
   if(mode()!=="chat" && GOAL_RE.test(text)){
-    const title=text.replace(/^(my goal is to|my goal is|goal:|set a goal( to)?|new goal( is)?( to)?)\s*/i,"").trim().replace(/[.!\s]+$/,"").slice(0,140);
+    const title=text.replace(/^(my goal is to|my goal is|my goal:|goal:|set a goal( to)?|new goal( is)?( to)?)\s*/i,"").trim().replace(/[.!\s]+$/,"").slice(0,140);
     const nice=title.charAt(0).toUpperCase()+title.slice(1);
     await addMsg("muse", `On it. I'm turning “${nice}” into a plan - give me a few seconds.`);
     renderChat();
