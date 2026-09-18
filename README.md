@@ -22,9 +22,24 @@ with no region locks and no server holding your life.
 - **Personal VM.** All state lives in your browser. Set a passphrase and the store is
   encrypted with AES-GCM using a key derived from your passphrase - a key only you hold.
 
+## Security
+
+- **Strict CSP:** `default-src 'none'` - the only network egress is the model call to
+  your chosen provider (openrouter.ai or tokenharbor.ai). No analytics, no CDN, no
+  third-party anything.
+- **E2EE at rest and in export:** with a passphrase set, the local store is AES-GCM
+  encrypted (PBKDF2, 210k iterations, key derived in-browser and never stored), and
+  data exports come out as encrypted envelopes only your passphrase opens.
+- **Keys are never embedded in code or artifacts.** The key field is user-entered,
+  clearable, and optional device persistence lives inside the encrypted store.
+- All user-controlled text is HTML-escaped before render; inputs are length- and
+  charset-validated.
+
 ## What it is honest about
 
-- It is BYO-key: chat runs on your own OpenRouter key, stored in this browser only.
+- It is BYO-key: chat runs on your own OpenRouter or Token Harbor key, stored in
+  this browser only. Token Harbor's `:free` models never charge; one Universal Key
+  covers its whole catalog.
 - On static hosting it cannot run after you close the tab; it picks up where it left
   off when you return and nudges you while it is open.
 - Connectors model the permission system locally. They gate planning and drafting;
@@ -39,3 +54,27 @@ No build step, no dependencies, no backend.
 ## License
 
 MIT - see LICENSE. Built from scratch; no code from Meta or any existing project.
+
+
+## Evolve (recursive self-improvement)
+
+Muse drafts concrete improvement proposals (DeepSeek :free route on Token Harbor by default), every attempt runs hard gates - self-tests, schema, size caps, secret scan, external-URL allowlist - and failed attempts stay logged. Nothing self-applies: a static page cannot rewrite its own deployed code. Approved proposals export as a patch bundle or hand off to Instinct with one tap.
+
+## Coder mode
+
+Toggle above chat. Muse reads its own actual source (same-origin) and drafts real diffs with colored rendering. Any diff converts straight into an Evolve proposal.
+
+## Tools, skills, MCP
+
+- Tool registry: calculator (parser, no eval), sandboxed JS worker (no DOM/storage, 5s limit), web search (your Tavily/Brave key), memory, tasks, reminders, fetch-page (open-network mode).
+- Muse can build its own tools: it writes the code, gates it, sandbox-tests it, you approve it into the registry.
+- Skills teach Muse workflows - three built-ins (togglable) plus your own.
+- MCP: remote Streamable HTTP servers over open-network mode. Stdio/local servers are unreachable from any web page (browser limit, stated in the UI).
+
+## Studio (user mini-apps)
+
+Muse builds single-file apps on request. They run in `studio-frame.html` - a sandboxed iframe (opaque origin, no storage) whose own CSP says `connect-src 'none'`. It cannot see your Muse data or the network. Download also works.
+
+## The orb
+
+Muse's orb is this tab. It sleeps when closed (nothing runs - stated honestly in the UI), wakes with everything intact, and catches up: late reminders fire labeled, open goals resume, stale tasks surface. Autonomy: while the tab is open, routine plan steps advance on their own; sensitive steps still pause for approval (the Autonomous toggle lives on the Goals board).
