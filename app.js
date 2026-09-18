@@ -858,7 +858,7 @@ async function sendChat(){
     el.remove();
     const calls = m0==="agent" ? parseToolCalls(out) : [];
     if(calls.length){
-      const display = out.replace(/```tool[\s\S]*?```/g,"").trim();
+      const display = stripToolFences(out).trim();
       if(display){ await addMsg("muse", display); renderChat(); }
       setPresence("working");
       const results=[];
@@ -1656,12 +1656,28 @@ async function execToolInner(id, args){
   catch(e){ return "Error: "+String(e.message||e).slice(0,200); }
 }
 
+function knownToolId(id){
+  return !!(id && (Tools[id] || (S() && S().customTools.some(t=>t.name===id && t.status==="active"))));
+}
 function parseToolCalls(text){
-  const out=[]; const re=/```tool\s*(\{[\s\S]*?)```/g; let m;
+  // Accepts the canonical ```tool {"tool":"id","args":{...}} fence, plus the common model
+  // deviation of naming the fence after the tool (```calc {"expression":"..."}).
+  const out=[]; const re=/```([a-zA-Z_][a-zA-Z0-9_]*)\s*(\{[\s\S]*?)```/g; let m;
   while((m=re.exec(text)) && out.length<4){
-    try{ const j=JSON.parse(m[1]); if(j && typeof j.tool==="string") out.push({tool:j.tool.slice(0,60), args:j.args||{}}); }catch(e){}
+    try{
+      const label=m[1], j=JSON.parse(m[2]); if(!j) continue;
+      if(label==="tool" && typeof j.tool==="string") out.push({tool:String(j.tool).slice(0,60), args:j.args||{}});
+      else if(knownToolId(label)) out.push(typeof j.tool==="string" ? {tool:String(j.tool).slice(0,60), args:j.args||{}} : {tool:label.slice(0,60), args:j});
+    }catch(e){}
   }
   return out;
+}
+function stripToolFences(text){
+  return String(text).replace(/```([a-zA-Z_][a-zA-Z0-9_]*)\s*(\{[\s\S]*?)```/g,(whole,label,body)=>{
+    if(label==="tool") return "";
+    if(knownToolId(label)){ try{ JSON.parse(body); return ""; }catch(e){ return whole; } }
+    return whole;
+  });
 }
 async function toolCard(tool, res){
   const c=document.createElement("div"); c.className="toolcard";
