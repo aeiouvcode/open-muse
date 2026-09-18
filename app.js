@@ -1,0 +1,2127 @@
+"use strict";
+/* =====================================================================
+   OPEN MUSE - an open-source, local-first personal agent.
+   Original implementation. Everything runs in this browser.
+   ===================================================================== */
+
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const nowISO = () => new Date().toISOString();
+const uid = p => (p||"id") + "-" + Math.random().toString(36).slice(2,9) + Date.now().toString(36).slice(-4);
+
+/* ---------------- store (Personal VM) ----------------
+   Plain mode: JSON in localStorage.
+   Locked mode: AES-GCM(PBKDF2(passphrase)) - the key never leaves the page. */
+const Store = {
+  raw: null,          // decrypted object while unlocked
+  locked: false,
+  passKey: null,      // CryptoKey while session unlocked
+  KEY: "openmuse.store.v1",
+  default(){
+    return {
+      settings: { provider: "openrouter", model: "", hasKey: false, saveKey: false, keyStored: "", mode: "agent", searchProvider: "tavily", searchKey: "", openNetwork: false, skillsOff: [], autonomy: true, theme: "serious", density: "comfortable", font: "m" },
+      chat: [],          // {role, text, ts, kind}
+      goals: [],         // {id,title,created,plan:{steps:[]},status}
+      memory: [],        // {id,text,ts,source}
+      audit: [],         // {ts,kind,text}
+      connectors: [      // local permission model (scopes gate what Muse may plan)
+        {id:"email",  name:"Email",    glyph:"✉", desc:"Read and draft email",            scope:"off"},
+        {id:"cal",    name:"Calendar", glyph:"◷", desc:"See availability, draft events",  scope:"off"},
+        {id:"files",  name:"Files",    glyph:"▤", desc:"Read documents you point it at",  scope:"off"},
+        {id:"web",    name:"Web",      glyph:"◎", desc:"Look things up while planning",   scope:"off"},
+        {id:"pay",    name:"Payments", glyph:"◈", desc:"Prepare checkouts (always needs approval)", scope:"off"},
+      ],
+      counters: { actions: 0 },
+      suggestions: [],
+      evolutions: [],     // {id,ts,ask,source,title,rationale,changes,testPlan,status,attempts,eval,decidedAt}
+      tasks: [],          // {id,text,status,created,doneAt}
+      reminders: [],      // {id,text,at,status,created,firedAt,late}
+      userSkills: [],     // {id,name,text}
+      miniapps: [],       // {id,name,code,created,from}
+      mcps: [],           // {id,name,url,key,tools:[{name,desc}]}
+      customTools: [],    // {id,name,desc,argsHint,code,sampleArgs,status,eval,created}
+      worklog: [],        // {ts,text} - milestone resume doc, newest first
+      lastSeen: "",
+    };
+  },
+  async deriveKey(pass, salt){
+    const enc = new TextEncoder();
+    const base = await crypto.subtle.importKey("raw", enc.encode(pass), "PBKDF2", false, ["deriveKey"]);
+    return crypto.subtle.deriveKey({name:"PBKDF2", salt, iterations:210000, hash:"SHA-256"}, base, {name:"AES-GCM", length:256}, false, ["encrypt","decrypt"]);
+  },
+  async load(){
+    const blob = localStorage.getItem(this.KEY);
+    if(!blob){ this.raw = this.default(); return; }
+    const parsed = JSON.parse(blob);
+    if(parsed.enc){
+      this.locked = true; this.raw = null; this._cipher = parsed;   // needs passphrase
+    } else {
+      this.raw = Object.assign(this.default(), parsed);
+      this.raw.settings = Object.assign(this.default().settings, parsed.settings || {});
+    }
+  },
+  async save(){
+    if(this.locked && this.passKey){
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const salt = this._cipher ? Uint8Array.from(atob(this._cipher.salt), c=>c.charCodeAt(0)) : crypto.getRandomValues(new Uint8Array(16));
+      const data = new TextEncoder().encode(JSON.stringify(this.raw));
+      const ct = await crypto.subtle.encrypt({name:"AES-GCM", iv}, this.passKey, data);
+      const b64 = buf => { const a=new Uint8Array(buf); let s=""; for(let i=0;i<a.length;i+=0x8000) s+=String.fromCharCode(...a.subarray(i,i+0x8000)); return btoa(s); };
+      this._cipher = {enc:1, v:1, salt:b64(salt), iv:b64(iv), data:b64(ct)};
+      localStorage.setItem(this.KEY, JSON.stringify(this._cipher));
+    } else if(!this.locked){
+      localStorage.setItem(this.KEY, JSON.stringify(this.raw));
+    }
+  },
+  async lock(pass){
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    // stash the salt first so save() encrypts with the SAME key it stores
+    this._cipher = {enc:1, v:1, salt: btoa(String.fromCharCode(...salt)), iv:"", data:""};
+    this.passKey = await this.deriveKey(pass, salt);
+    this.locked = true;
+    await this.save();
+  },
+  async unlock(pass){
+    const salt = Uint8Array.from(atob(this._cipher.salt), c=>c.charCodeAt(0));
+    const key = await this.deriveKey(pass, salt);
+    const iv = Uint8Array.from(atob(this._cipher.iv), c=>c.charCodeAt(0));
+    const data = Uint8Array.from(atob(this._cipher.data), c=>c.charCodeAt(0));
+    const pt = await crypto.subtle.decrypt({name:"AES-GCM", iv}, key, data);
+    const dec = JSON.parse(new TextDecoder().decode(pt));
+    this.raw = Object.assign(this.default(), dec);
+    this.raw.settings = Object.assign(this.default().settings, dec.settings || {});
+    this.passKey = key;
+    return true;
+  },
+  wipe(){ localStorage.removeItem(this.KEY); }
+};
+const S = () => Store.raw;
+
+/* model providers - OpenAI-compatible chat completions shape */
+const PROVIDERS = {
+  openrouter:  { name:"OpenRouter",   url:"https://openrouter.ai/api/v1/chat/completions", modelsUrl:"https://openrouter.ai/api/v1/models", defModel:"openai/gpt-4o-mini",       keyPh:"sk-or-...",    hint:"key from openrouter.ai/keys",
+                 fallback:["openai/gpt-4o-mini","openai/gpt-4o","anthropic/claude-sonnet-4.5","google/gemini-2.5-flash","deepseek/deepseek-chat-v3-0324"] },
+  tokenharbor: { name:"Token Harbor", url:"https://tokenharbor.ai/v1/chat/completions",    modelsUrl:"https://tokenharbor.ai/v1/models",    defModel:"deepseek-v4.1-flash:free", keyPh:"thk_live_...", hint:"Universal Key from the tokenharbor.ai dashboard - :free models never charge",
+                 fallback:["deepseek-v4.1-flash:free","mimo-v2.5:free","muse-spark-3","kimi-k3","glm-5.3","gemini-3.8-flash"] },
+};
+const provider = () => PROVIDERS[S().settings.provider] || PROVIDERS.openrouter;
+const activeModel = () => S().settings.model || provider().defModel;
+
+/* ---------------- audit ---------------- */
+/* worklog: persistent milestone doc so any later session resumes cleanly.
+   Milestones only - the audit trail keeps the full detail. */
+async function logWork(text){
+  const s=S(); if(!s) return;
+  if(!s.worklog) s.worklog=[];
+  s.worklog.unshift({ts:nowISO(), text});
+  if(s.worklog.length>40) s.worklog.length=40;
+  await Store.save(); renderWorklog();
+}
+function worklogNow(){
+  const s=S(); if(!s) return "";
+  const bits=[];
+  const active=s.goals.find(g=>g.status==="active");
+  if(active){
+    const step=active.plan.steps.find(x=>x.status==="todo"||x.status==="approval");
+    bits.push(`active goal "${active.title}" (${active.plan.steps.filter(x=>x.status==="done").length}/${active.plan.steps.length} steps done${step?`, next: "${step.title}"${step.status==="approval"?" - waiting for approval":""}`:", plan complete"})`);
+  } else bits.push("no active goal");
+  const pend=s.goals.flatMap(g=>g.plan.steps).filter(x=>x.status==="approval").length;
+  if(pend) bits.push(`${pend} approval${pend>1?"s":""} waiting`);
+  if(s.memory.length) bits.push(`${s.memory.length} memor${s.memory.length>1?"ies":"y"}`);
+  const muted=Object.entries((s.proactivity&&s.proactivity.kinds)||{}).filter(([,k])=>k.muted).map(([n])=>n);
+  if(muted.length) bits.push(`proposal kinds muted: ${muted.join(", ")}`);
+  return bits.join(" · ");
+}
+function renderWorklog(){
+  const s=S(); if(!s || !$("#worklog")) return;
+  const entries=(s.worklog||[]).slice(0,15).map(w=>`<div class="auline"><span class="t">${fmtD(w.ts)}</span><span class="k">work</span><span>${esc(w.text)}</span></div>`).join("");
+  $("#worklog").innerHTML = `<div class="wlbox"><div class="lbl">Worklog - resume card</div><div class="wlnow"><b>Right now:</b> ${esc(worklogNow())}</div>${entries || `<div class="empty">Milestones land here as they happen.</div>`}</div>`;
+}
+
+async function audit(kind, text){
+  S().audit.unshift({ts: nowISO(), kind, text});
+  if(S().audit.length > 500) S().audit.length = 500;
+  if(kind === "action") S().counters.actions++;
+  await Store.save();
+  renderAudit(); renderStatus();
+}
+
+/* ---------------- ui helpers ---------------- */
+function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("on"); clearTimeout(t._x); t._x=setTimeout(()=>t.classList.remove("on"),2600); }
+function openModal(html){ const m=$("#modal"); m.innerHTML=html; $("#modalwrap").classList.add("on");
+  m.querySelectorAll(".modal-cancel").forEach(b=>b.addEventListener("click", closeModal)); }
+function closeModal(){ $("#modalwrap").classList.remove("on"); }
+$("#modalwrap").addEventListener("click", e=>{ if(e.target.id==="modalwrap" && !$("#modalwrap").dataset.sticky) closeModal(); });
+const esc = s => s.replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmtT = iso => { const d=new Date(iso); return d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}); };
+const fmtD = iso => { const d=new Date(iso); return d.toLocaleString([], {year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}); };
+
+/* navigation */
+$$(".navbtn").forEach(b => b.addEventListener("click", () => {
+  switchView(b.dataset.view);
+  $("#rail").classList.remove("open"); $("#railbackdrop").style.display="none";
+}));
+$("#menubtn").addEventListener("click", ()=>{ const r=$("#rail"); r.classList.toggle("open"); $("#railbackdrop").style.display = r.classList.contains("open") ? "block" : "none"; });
+$("#railbackdrop").addEventListener("click", ()=>{ $("#rail").classList.remove("open"); $("#railbackdrop").style.display="none"; });
+
+/* ---------------- status / queue ----------------
+   The dock rail is live: it shows what Muse is doing right now (goal step,
+   active tool with a spinner, last completed action) and compacts honestly
+   when idle. RT is transient runtime state - never persisted. */
+const RT = {state:"idle", step:"", tool:"", last:""};
+function setRT(patch){ Object.assign(RT, patch); renderStatus(); }
+function renderStatus(){
+  const s=S(); if(!s) return;
+  const busy = RT.state!=="idle" || !!RT.tool;
+  document.body.classList.toggle("agent-busy", busy);
+  $("#st-title").textContent = busy ? "Working" : "Agent status";
+  $("#st-live").hidden = !busy;
+  $("#st-step").textContent = RT.step || "Working";
+  $("#st-tool").hidden = !RT.tool;
+  $("#st-toolname").textContent = RT.tool;
+  const teamBox = $("#st-team");
+  if(TEAM.active && TEAM.agents.length){
+    teamBox.hidden = false;
+    teamBox.innerHTML = TEAM.agents.map(ag=>
+      `<div class="teamrow"><span class="tic ${ag.status}">${ag.status==="done"?"\u2713":ag.status==="failed"?"\u2715":ag.status==="running"?'<i class="spin"></i>':"\u00b7"}</span><span class="trole">${esc(ag.role)}</span><span class="ttask">${esc(ag.task)}</span></div>`).join("");
+  } else teamBox.hidden = true;
+  $("#st-lastrow").hidden = !RT.last;
+  $("#st-last").textContent = RT.last; $("#st-last").title = RT.last;
+  const keyTxt = sessionStorage.getItem("openmuse.key") ? "set (session)" : (s.settings.keyStored ? "set (device)" : null);
+  // Only name a provider/model once one is actually usable - a default label
+  // with no key behind it is a claim the app can't back.
+  const m = keyTxt ? provider().name + " / " + activeModel() : null;
+  $("#st-model").textContent = m || "none yet";
+  $("#st-model").title = m || "";
+  $("#st-model").classList.toggle("muted", !m);
+  $("#st-key").textContent = keyTxt || "none yet";
+  $("#st-key").classList.toggle("muted", !keyTxt);
+  $("#st-actions").textContent = s.counters.actions;
+  const pending = s.goals.flatMap(g=>g.plan.steps).filter(x=>x.status==="approval").length;
+  $("#st-pending").textContent = pending;
+  $("#st-pending").classList.toggle("hot", pending>0);
+  $("#st-minipending").hidden = pending===0; $("#st-minipending").textContent = pending;
+  $("#memcount").textContent = s.memory.length;
+  const q = $("#queue");
+  const items = s.goals.flatMap(g=>g.plan.steps.filter(x=>x.status!=="done").map(x=>({g,x})));
+  q.innerHTML = items.length ? items.slice(0,8).map(({g,x}) =>
+    `<div class="queue-item">${esc(x.title)}<div class="w">${esc(g.title)} · ${x.status}${x.kind!=="agent"?" · "+x.kind:""}</div></div>`).join("")
+    : `<div class="empty" style="padding:14px">Queue is empty.<br>Set a goal and Muse starts planning.</div>`;
+}
+
+/* ---------------- renders ---------------- */
+function renderAudit(){
+  const s=S(); if(!s) return;
+  renderWorklog();
+  $("#auditlog").innerHTML = s.audit.length ? s.audit.map(a =>
+    `<div class="auline"><span class="t">${fmtD(a.ts)}</span><span class="k">${esc(a.kind)}</span><span>${esc(a.text)}</span></div>`).join("")
+    : `<div class="empty">Nothing yet. Every action Muse takes will be recorded here.</div>`;
+}
+function renderMemory(){
+  const s=S(); if(!s) return;
+  const byDir={preferences:[],people:[],projects:[],facts:[]};
+  s.memory.forEach(m=>byDir[VM_DIRS[m.kind||(m.kind=memKind(m.text))]||"facts"].push(m));
+  const dirHtml=Object.entries(byDir).filter(([,items])=>items.length).map(([dir,items])=>
+    `<div class="lbl" style="margin:14px 0 8px">vm://memory/${dir}</div>` + items.map(m=>memItemHtml(m)).join("")).join("");
+  $("#memlist").innerHTML = s.memory.length ? dirHtml
+    : `<div class="empty">Muse has not learned anything yet. Talk to it - it remembers what matters, and you can edit or forget anything.</div>`;
+  bindMemlist();
+}
+function memItemHtml(m){
+  return `<div class="memitem"><div class="txt">${m.pinned?`<span class="memchip pinned">pinned</span>`:""}<span class="memchip">${m.kind||"fact"}</span>${esc(m.text)}<div class="when">${vmPath(m)} · learned ${m.ts.slice(0,10)} · ${esc(m.source||"conversation")}${m.uses?" · used "+m.uses+"x":""}${m.updated?" · revised "+m.updated+"x":""}${m.expiresAt?(memAlive(m)?" · expires "+m.expiresAt.slice(0,10):" · expired - removed on next load"):""}${m.pinned?" · rides every prompt":""}</div></div>
+     <button class="iconbtn${m.pinned?" on":""}" data-pinmem="${m.id}" title="${m.pinned?"Unpin - stop injecting into every prompt":"Pin - always inject into every prompt"}">⚲</button>
+     <button class="iconbtn" data-editmem="${m.id}" title="Edit this memory">\u270e</button>
+     <button class="iconbtn" data-forget="${m.id}" title="Forget this">✕</button></div>`;
+}
+function bindMemlist(){
+  $$("#memlist [data-pinmem]").forEach(b => b.addEventListener("click", async () => {
+    const m=S().memory.find(x=>x.id===b.dataset.pinmem); if(!m) return;
+    m.pinned=!m.pinned;
+    await audit("memory", `${m.pinned?"Pinned":"Unpinned"}: "${m.text.slice(0,60)}"${m.pinned?" - it rides every prompt now":""}`);
+    await Store.save(); renderMemory();
+  }));
+  $$("#memlist [data-editmem]").forEach(b => b.addEventListener("click", () => {
+    const m=S().memory.find(x=>x.id===b.dataset.editmem); if(!m) return;
+    openModal(`<h3>Edit memory</h3>
+      <div class="field"><input type="text" id="memedit" value="${esc(m.text).replace(/"/g,"&quot;")}" maxlength="280"></div>
+      <div class="row"><button class="btn modal-cancel">Cancel</button><button class="btn pri" id="memeditsave">Save</button></div>`);
+    $("#memeditsave").onclick=async()=>{
+      const t=$("#memedit").value.trim().slice(0,280);
+      if(t.length>=8 && t!==m.text){ await audit("memory", `Edited memory: "${m.text.slice(0,60)}" -> "${t.slice(0,60)}"`); m.text=t; m.updated=(m.updated||0)+1; m.kind=memKind(t); m.expiresAt=memExpiry(t); delete m._tok; await Store.save(); renderMemory(); }
+      closeModal();
+    };
+    setTimeout(()=>$("#memedit").focus(), 50);
+  }));
+  $$("#memlist [data-forget]").forEach(b => b.addEventListener("click", async () => {
+    const id=b.dataset.forget; const i=S().memory.findIndex(m=>m.id===id);
+    if(i>=0){ const [gone]=S().memory.splice(i,1); await audit("memory", `Forgot: "${gone.text}"`); await Store.save(); renderMemory(); renderStatus(); toast("Forgotten."); }
+  }));
+}
+function renderConnectors(){
+  const s=S(); if(!s) return;
+  $("#connlist").innerHTML = s.connectors.map(c =>
+    `<div class="conn"><div class="glyph">${c.glyph}</div>
+      <div class="inf"><b>${esc(c.name)}</b><p>${esc(c.desc)}</p></div>
+      <div class="seg" data-conn="${c.id}">
+        ${["off","read","read+write"].map(v=>`<button data-v="${v}" class="${c.scope===v?"on":""}">${v}</button>`).join("")}
+      </div></div>`).join("");
+  $$("#connlist .seg button").forEach(b => b.addEventListener("click", async () => {
+    const seg=b.parentElement; const c=S().connectors.find(x=>x.id===seg.dataset.conn);
+    c.scope=b.dataset.v; await audit("permission", `${c.name} permission set to "${c.scope}"`);
+    await Store.save(); renderConnectors();
+  }));
+}
+function renderGoals(){
+  const s=S(); if(!s) return;
+  const grid=$("#goalgrid");
+  if(!s.goals.length){ grid.innerHTML=`<div class="empty" style="grid-column:1/-1">No goals yet. Tell Muse a goal in chat - "my goal is to..." - or use + New goal.</div>`; return; }
+  grid.innerHTML = s.goals.map(g => {
+    const done=g.plan.steps.filter(x=>x.status==="done").length;
+    const pct=Math.round(100*done/g.plan.steps.length);
+    return `<div class="goal" data-goal="${g.id}">
+      <h3>${esc(g.title)}</h3>
+      <div class="progbar"><i style="width:${pct}%"></i></div>
+      <div class="small" style="font-size:11.5px;color:var(--dim)">${done}/${g.plan.steps.length} steps · ${g.status}</div>
+      <div class="steps">${g.plan.steps.map(x=>{
+        const ic = x.status==="done"?"✓":x.status==="approval"?"⏸":x.status==="doing"?"…":x.kind==="user"?"◌":"·";
+        return `<div class="step ${x.status}" ${x.status==="done"?`data-reopen="${g.id}|${x.id}" title="Click to reopen this step"`:""}><span class="ic">${ic}</span><span class="st-t">${esc(x.title)}</span><span class="tag">${x.kind}</span></div>`;
+      }).join("")}</div>
+      <div class="row">
+        <button class="btn pri" data-advance="${g.id}" ${g.status==="done"?"disabled":""}>${g.status==="done"?"Complete":"Advance"}</button>
+        <button class="btn" data-team="${g.id}|team" title="Orchestrator splits this goal between researcher/coder/reviewer/writer agents running in parallel, then merges">Team</button>
+        <button class="btn" data-team="${g.id}|swarm" title="Three agents attack the same goal from different angles, then merge">Swarm</button>
+        <button class="btn" data-discuss="${g.id}">Discuss</button>
+        <button class="btn badb" data-delgoal="${g.id}">Drop</button>
+      </div></div>`;
+  }).join("");
+  $$("[data-advance]").forEach(b=>b.addEventListener("click",()=>advanceGoal(b.dataset.advance)));
+  $$("[data-team]").forEach(b=>b.addEventListener("click",()=>{ const [gid,md]=b.dataset.team.split("|"); runTeam(gid, md==="swarm"?"swarm":"team"); }));
+  $$("[data-discuss]").forEach(b=>b.addEventListener("click",g=>{ switchView("chat"); const goal=S().goals.find(x=>x.id===g.target.dataset.discuss); if(goal){ $("#chatinput").value=`About my goal "${goal.title}": `; $("#chatinput").focus(); } }));
+  $$("[data-reopen]").forEach(b=>b.addEventListener("click", async ()=>{
+    const [gid,sid]=b.dataset.reopen.split("|");
+    const g=S().goals.find(x=>x.id===gid); const st=g&&g.plan.steps.find(x=>x.id===sid); if(!st) return;
+    st.status="todo"; st.output=""; g.status="active";
+    await audit("plan",`Reopened step: "${st.title}" (goal: "${g.title}")`);
+    await Store.save(); renderGoals(); renderStatus(); toast("Step reopened.");
+  }));
+  $$("[data-delgoal]").forEach(b=>b.addEventListener("click", async ()=>{ const id=b.dataset.delgoal; const i=S().goals.findIndex(x=>x.id===id); if(i>=0){ await audit("goal",`Dropped goal "${S().goals[i].title}"`); S().goals.splice(i,1); await Store.save(); renderGoals(); renderStatus(); } }));
+}
+function switchView(name){
+  $$(".navbtn").forEach(x=>x.classList.toggle("on", x.dataset.view===name));
+  $$(".view").forEach(v=>v.classList.toggle("on", v.id==="view-"+name));
+  if(name==="settings"){ $("#setprovider").value = S().settings.provider || "openrouter"; $("#setsavekey").checked = !!S().settings.keyStored; syncProviderUI(); populateModelSelect(); }
+  if(name==="evolve") renderEvolutions();
+}
+function renderAll(){ renderGoals(); renderMemory(); renderConnectors(); renderAudit(); renderStatus(); renderChat(); renderEvolutions(); renderTasks(); renderRems(); renderTools(); renderSkills(); renderMcps(); renderStudio(); }
+
+/* ---------------- chat ---------------- */
+function addMsg(role, text, kind){
+  const s=S();
+  s.chat.push({role, text, ts: nowISO(), kind: kind||""});
+  if(s.chat.length>400) s.chat.splice(0, s.chat.length-400);
+  return Store.save();
+}
+function renderChat(){
+  const s=S(); if(!s) return;
+  const log=$("#chatlog");
+  log.innerHTML = s.chat.map(m => {
+    if(m.kind==="card") return m.text;   // pre-rendered card html (approval/suggestion cards render live below)
+    if(m.kind==="tool"){ const [t,r]=m.text.split("|||"); return `<div class="toolcard"><b>⚙ ${esc(t)}</b><div class="res">${esc(r)}</div></div>`; }
+    const cls = m.role==="user" ? "user" : m.role==="sys" ? "sys" : "muse";
+    const body = m.role==="muse" ? mdLite(m.text) : esc(m.text);
+    return `<div class="msg ${cls}"><div class="body">${body}</div><div class="meta">${fmtT(m.ts)}</div></div>`;
+  }).join("");
+  // live approval cards
+  s.goals.forEach(g => g.plan.steps.forEach(x => {
+    if(x.status==="approval" && !document.getElementById("ap-"+x.id)){
+      const c=document.createElement("div"); c.className="card"; c.id="ap-"+x.id;
+      c.innerHTML=`<h4>⏸ Approval needed</h4><div class="small"><b>${esc(x.title)}</b> - part of goal “${esc(g.title)}”. Sentinel policy: sensitive actions always wait for you.</div>
+        <div class="row"><button class="btn okb" data-approve="${g.id}|${x.id}">Approve &amp; run</button>
+        <button class="btn badb" data-reject="${g.id}|${x.id}">Reject</button></div>`;
+      log.appendChild(c);
+    }
+  }));
+  $$("#chatlog [data-approve]").forEach(b=>b.onclick=()=>decideStep(b.dataset.approve,true));
+  $$("#chatlog [data-reject]").forEach(b=>b.onclick=()=>decideStep(b.dataset.reject,false));
+  log.scrollTop = log.scrollHeight;
+}
+function inlineMd(t){
+  return esc(t).replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>").replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\n/g,"<br>");
+}
+function mdLite(t){
+  const re = /```([a-zA-Z]*)\n?([\s\S]*?)```/;
+  let out = "", rest = String(t), m;
+  while((m = rest.match(re))){
+    out += inlineMd(rest.slice(0, m.index));
+    const lang = m[1] || "", code = m[2].replace(/\n$/, "");
+    const html = lang === "diff"
+      ? esc(code).split("\n").map(l => `<span class="dl ${l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : l.startsWith("@") ? "hunk" : ""}">${l || " "}</span>`).join("\n")
+      : esc(code);
+    out += `<pre class="codeblock"${lang ? ` data-lang="${esc(lang)}"` : ""}><code>${html}</code></pre>`;
+    rest = rest.slice(m.index + m[0].length);
+  }
+  return out + inlineMd(rest);
+}
+
+/* ---------------- model ---------------- */
+function getKey(){ return sessionStorage.getItem("openmuse.key") || (S() && S().settings.keyStored) || ""; }
+/* human-readable model errors: never show raw provider JSON in chat */
+function friendlyModelError(e){
+  const m = String(e && e.message || e);
+  if(m==="no-key") return "No model key set. Open Muse is BYO-key: paste a key in Settings (OpenRouter or Token Harbor) - it stays in this browser.";
+  const st = m.match(/\bmodel (\d{3})\b/) || m.match(/\b(401|402|403|404|408|409|429|5\d\d)\b/);
+  const code = st ? st[1] : "";
+  if(code==="401") return "The provider rejected the call as unauthenticated (401) - the key is missing, malformed or revoked. Check it in Settings, or switch provider.";
+  if(code==="402") return "The provider says this key is out of credit (402). Top up, or switch to a free model.";
+  if(code==="403") return "The provider refused this key (403) - it may not have access to that model. Check the key in Settings or pick another model.";
+  if(code==="404") return "The provider does not recognize that model (404). Pick another model in Settings.";
+  if(code==="429") return "Rate limited (429) - too many requests right now. Give it a moment and try again.";
+  if(code && code[0]==="5") return "The provider is having server trouble ("+code+"). Try again shortly.";
+  if(/failed to fetch|networkerror|load failed/i.test(m)) return "Could not reach the model provider - network blocked or offline. OpenRouter and Token Harbor both allow direct browser calls, so this is usually connectivity.";
+  return "Model call failed: "+m.slice(0,140);
+}
+
+async function chatStream(messages, onTok){
+  const key=getKey();
+  if(!key) throw new Error("no-key");
+  const r = await fetch(provider().url, {
+    method:"POST",
+    headers:{ "Authorization":"Bearer "+key, "Content-Type":"application/json" },
+    body: JSON.stringify({ model: activeModel(), messages, stream:true, temperature:0.7 })
+  });
+  if(!r.ok){ const t=await r.text(); throw new Error("model "+r.status+": "+t.slice(0,160)); }
+  const rd=r.body.getReader(); const dec=new TextDecoder(); let buf="", out="";
+  for(;;){
+    const {done,value}=await rd.read(); if(done) break;
+    buf+=dec.decode(value,{stream:true});
+    let i; while((i=buf.indexOf("\n"))>=0){
+      const line=buf.slice(0,i).trim(); buf=buf.slice(i+1);
+      if(!line.startsWith("data:")) continue;
+      const d=line.slice(5).trim(); if(d==="[DONE]") return out;
+      try{ const tok=JSON.parse(d).choices?.[0]?.delta?.content || ""; if(tok){ out+=tok; onTok && onTok(out); } }catch(e){}
+    }
+  }
+  return out;
+}
+async function chatOnce(messages, json, model){
+  const key=getKey(); if(!key) throw new Error("no-key");
+  const body={ model: model || activeModel(), messages, temperature:0.3 };
+  const purl = provider().url;
+  if(json) body.response_format={type:"json_object"};
+  const r=await fetch(purl,{method:"POST",headers:{"Authorization":"Bearer "+key,"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok) throw new Error("model "+r.status);
+  return (await r.json()).choices[0].message.content;
+}
+
+/* ---------------- AI SDK-shaped protocol ----------------
+   All model access goes through this layer, shaped after the Vercel AI SDK:
+   a provider exposing generateText/streamText over {role, content} model
+   messages, and tool exchanges carried as AI-SDK-style parts
+   ({type:"tool-call"|"tool-result", toolCallId, toolName, args|result}) on
+   the assistant message's `parts` field. A future swap to the real SDK
+   touches this object and the parts helpers - nothing else. */
+const AI = {
+  provider(){
+    return {
+      id: String(provider().name||"unknown").toLowerCase().replace(/\s+/g,"-"),
+      model: activeModel(),
+      generateText: ({messages, json}) => chatOnce(messages, json),
+      streamText: ({messages, onChunk}) => chatStream(messages, onChunk)
+    };
+  }
+};
+function toolCallParts(calls, results){
+  return [
+    ...calls.map((c,i)=>({type:"tool-call", toolCallId:"call_"+i, toolName:c.tool, args:c.args||{}})),
+    ...results.map((r,i)=>({type:"tool-result", toolCallId:"call_"+i, toolName:r.tool, result:String(r.result).slice(0,1000)}))
+  ];
+}
+
+/* ---------------- memory engine: Mem0/Cognee patterns, fully local ----------------
+   Mem0-style durable facts: add OR update-in-place (never a growing pile of
+   near-duplicates), gentle recency decay that re-ranks but NEVER deletes,
+   usage tracking. Cognee-style retrieval: hybrid scoring (token similarity
+   blended with recency + usage) plus a graph-lite one-hop expansion over
+   memories linked by shared salient terms. No embeddings, no servers -
+   everything lives in the encrypted local store. */
+const _STOP = new Set(("the a an and or of to in for on with is are was were be been my your his her its our their this that these those it as at by from about into over after am do does did have has had will would can could should not no yes but so if then than too very just").split(" "));
+function memTokens(t){
+  return String(t||"").toLowerCase().replace(/[^a-z0-9\s]/g," ").split(/\s+/).filter(w=>w.length>2 && !_STOP.has(w));
+}
+function jaccard(a, b){
+  const A=new Set(a), B=new Set(b); let i=0;
+  for(const w of A) if(B.has(w)) i++;
+  return i/Math.max(1, A.size+B.size-i);
+}
+function memSim(qt, m){
+  const mt = m._tok || (m._tok = memTokens(m.text));
+  let s = jaccard(qt, mt);
+  const ql=qt.join(" "), ml=String(m.text).toLowerCase();
+  if(ql.length>5 && ml.includes(ql)) s=Math.max(s, 0.55); // direct phrase containment
+  return s;
+}
+function memKind(text){
+  const t=String(text).toLowerCase();
+  if(/\b(prefer|prefers|preferred|favorite|likes|loves|hates|dislikes|always|never|usually|vegetarian|vegan|allergic|tone|style)\b/.test(t)) return "preference";
+  if(/\b(wife|husband|partner|girlfriend|boyfriend|friend|mother|father|mom|dad|brother|sister|son|daughter|colleague|coworker|boss|manager|mentor)\b/.test(t)) return "person";
+  if(/\b(project|building|launching|startup|app|website|repo|company|client|product|deadline|launch)\b/.test(t)) return "project";
+  return "fact";
+}
+function memExpiry(text){
+  const t=String(text).toLowerCase(), d=Date.now();
+  if(/\b(tonight|today|this morning|this afternoon|this evening)\b/.test(t)) return new Date(d+86400000).toISOString();
+  if(/\btomorrow\b/.test(t)) return new Date(d+2*86400000).toISOString();
+  if(/\b(this week|this weekend)\b/.test(t)) return new Date(d+7*86400000).toISOString();
+  if(/\bnext week\b/.test(t)) return new Date(d+10*86400000).toISOString();
+  return null;
+}
+const memAlive = m => !m.expiresAt || new Date(m.expiresAt).getTime() > Date.now();
+async function rememberFact(text, source){
+  const s=S(); text=String(text||"").trim().slice(0,280); if(text.length<8) return null;
+  const tt=memTokens(text);
+  let best=null, bestSim=0;
+  for(const m of s.memory){ if(!memAlive(m)) continue; const sim=memSim(tt, m); if(sim>bestSim){ bestSim=sim; best=m; } }
+  if(best && bestSim>=0.6){
+    // Mem0-style UPDATE: the same fact evolved -> update in place, keep one record
+    if(best.text.toLowerCase()!==text.toLowerCase()){
+      await audit("memory", `Updated memory: "${best.text.slice(0,60)}" -> "${text.slice(0,60)}"`);
+      best.text=text; delete best._tok;
+      best.ts=nowISO(); best.updated=(best.updated||0)+1; if(source) best.source=source;
+      best.kind=memKind(text); best.expiresAt=memExpiry(text);
+      await Store.save(); renderMemory(); return best;
+    }
+    // exact duplicate: refresh quietly, announce nothing - nothing was learned
+    best.ts=nowISO();
+    await Store.save(); return null;
+  }
+  const m={id:uid("mem"), text, ts:nowISO(), source:source||"conversation", uses:0, kind:memKind(text), expiresAt:memExpiry(text)};
+  s.memory.unshift(m);
+  await audit("memory", `Learned: "${text}"`);
+  await Store.save(); renderMemory(); return m;
+}
+function retrieveMemory(query, k){
+  const s=S(); const out={hits:[], related:[]};
+  const pool=s.memory.filter(memAlive);
+  if(!pool.length) return out;
+  const qt=memTokens(query); if(!qt.length) return out;
+  const now=Date.now();
+  const scored=pool.map(m=>{
+    const sim=memSim(qt, m);
+    const ageDays=(now-new Date(m.ts).getTime())/86400000;
+    const recency=1/(1+ageDays/30);               // decay re-ranks, never deletes
+    const usage=1+Math.min(3, m.uses||0)*0.15;
+    return {m, sim, score:sim*recency*usage};
+  }).filter(x=>x.sim>0.06).sort((a,b)=>b.score-a.score);
+  out.hits=scored.slice(0, k||6).map(x=>x.m);
+  // graph-lite one hop: memories sharing salient terms with a hit come along as "linked"
+  const inHits=new Set(out.hits.map(m=>m.id));
+  for(const h of out.hits){
+    const ent=memTokens(h.text).filter(w=>w.length>4);
+    if(!ent.length) continue;
+    for(const c of pool){
+      if(inHits.has(c.id) || out.related.includes(c)) continue;
+      if(jaccard(ent, memTokens(c.text).filter(w=>w.length>4))>=0.34){ out.related.push(c); }
+      if(out.related.length>=2) break;
+    }
+    if(out.related.length>=2) break;
+  }
+  out.hits.forEach(m=>{ m.uses=(m.uses||0)+1; m.lastUsed=nowISO(); });
+  out.related.forEach(m=>{ m.uses=(m.uses||0)+1; });
+  return out;
+}
+
+/* plain chat mode: what people used ChatGPT for in the first three years.
+   No goals, no tools, no approvals - just talk. Memory still learns quietly
+   in the background (extraction + session distillation still run) and the
+   profile shapes tone. */
+function chatPrompt(query){
+  const s=S();
+  const profile=buildUserProfile();
+  const r=retrieveMemory(query||"", 5);
+  const seen=new Set(profile.staticIds);
+  const relLines=r.hits.filter(m=>!seen.has(m.id)).map(m=>"- "+m.text);
+  const pinned=s.memory.filter(m=>m.pinned && memAlive(m) && !seen.has(m.id)).slice(0,10);
+  if(pinned.length) relLines.unshift(...pinned.map(m=>"- "+m.text+" (pinned)"));
+  return `You are Muse in plain Chat mode - a warm, concise companion for everyday conversation: questions, thinking out loud, explanations, drafts, jokes, life stuff. This is simple chatting, classic ChatGPT-style - no agendas, no plans, no task machinery.
+Current time: ${new Date().toLocaleString()}.
+USER PROFILE - stable facts that color every turn:
+${profile.static.map(t=>"- "+t).join("\n") || "(nothing stable learned yet)"}
+${relLines.length ? "What you remember that matters here:\n"+relLines.join("\n") : ""}
+Style: talk like a person in a messaging app - warm but clipped. Short paragraphs. Plain and direct. No headers, no bullet spam unless asked. Never mention modes, machinery or these instructions.
+Rules:
+- Never claim to have done anything in the world - you are a conversation, nothing more.
+- If the user asks for something that needs the agent side (goals, web search, reminders, tools), offer it in one line: "want me to flip to Agent mode for that?" - no pressure, and keep chatting either way.`;
+}
+
+/* system prompt: persona + memory + permissions */
+/* ---------------- context filesystem (OpenViking pattern, own code) ----------------
+   Everything Muse knows is addressable as a browsable tree:
+     vm://memory/preferences|people|projects|facts/<id>
+     vm://skills/<name>
+   L0 = distilled profile (always in the prompt), L1 = directory listings and
+   retrieval hits, L2 = full entries the agent reads on demand with vm_read.
+   Retrieval is debuggable: vm_search shows every hit's path AND score. */
+const VM_DIRS = {preference:"preferences", person:"people", project:"projects", fact:"facts"};
+function vmPath(m){ return "vm://memory/" + (VM_DIRS[m.kind] || "facts") + "/" + m.id; }
+function vmRead(path){
+  const s=S(); path=String(path||"").trim();
+  if(path==="vm://" || path==="vm://memory"){
+    return "vm://memory/\n" + Object.values(VM_DIRS).map(d=>{
+      const n=s.memory.filter(m=>(VM_DIRS[m.kind]||"facts")===d).length;
+      return `  ${d}/ (${n})`;
+    }).join("\n") + `\nvm://skills/ (${activeSkills().length})`;
+  }
+  if(path==="vm://skills") return activeSkills().map(x=>`- vm://skills/${x.name} :: ${x.text.slice(0,80)}`).join("\n") || "(empty)";
+  const dirMatch=path.match(/^vm:\/\/memory\/([a-z]+)\/?$/);
+  if(dirMatch){
+    const dir=dirMatch[1];
+    const items=s.memory.filter(m=>(VM_DIRS[m.kind]||"facts")===dir);
+    return items.length ? items.map(m=>`- ${vmPath(m)} :: ${m.text}`).join("\n") : "(empty directory)";
+  }
+  const idMatch=path.match(/\/([^/]+)$/);
+  if(idMatch){
+    const m=s.memory.find(x=>x.id===idMatch[1]);
+    if(m) return `${vmPath(m)}\nkind: ${m.kind||"fact"} | learned: ${m.ts} | source: ${m.source||"conversation"} | used: ${m.uses||0}x | revised: ${m.updated||0}x${m.expiresAt?" | expires: "+m.expiresAt:""}\n\n${m.text}`;
+  }
+  return "not found: "+path+" (try vm:// to list the root)";
+}
+
+/* User profile (supermemory pattern, computed locally on read): a STATIC
+   block of stable identity facts that must color every turn - a name or tone
+   preference never matches a semantic query, so it cannot wait for retrieval -
+   plus a DYNAMIC block of what is happening right now. */
+function buildUserProfile(){
+  const s=S(); const now=Date.now();
+  const alive=s.memory.filter(memAlive);
+  const isStable=m=>{ const k=m.kind||(m.kind=memKind(m.text));
+    return k==="preference" || k==="person" || (m.uses||0)>=2 || (now-new Date(m.ts).getTime())>14*86400000; };
+  const stat=alive.filter(isStable)
+    .sort((x,y)=>((y.uses||0)-(x.uses||0)) || (new Date(x.ts)-new Date(y.ts)))
+    .slice(0,5).map(m=>m.text);
+  const dyn=[];
+  const ag=s.goals.filter(g=>g.status==="active").slice(0,3);
+  if(ag.length) dyn.push("active goals: "+ag.map(g=>g.title).join("; "));
+  const ot=s.tasks.filter(t=>t.status==="open").slice(0,4);
+  if(ot.length) dyn.push("open tasks: "+ot.map(t=>t.text).join("; "));
+  const pr=s.reminders.filter(r=>r.status==="pending").slice(0,3);
+  if(pr.length) dyn.push("reminders: "+pr.map(r=>r.text+" @ "+new Date(r.at).toLocaleString()).join("; "));
+  return {static:stat, dynamic:dyn, staticIds:new Set(alive.filter(isStable).slice(0,5).map(m=>m.id))};
+}
+
+function systemPrompt(query){
+  const s=S();
+  const profile = buildUserProfile();
+  let mem = "(nothing learned yet)";
+  if(s.memory.length){
+    const r = retrieveMemory(query||"", 6);
+    const seen = new Set(profile.staticIds);
+    const lines = [];
+    const pinned = s.memory.filter(m=>m.pinned && memAlive(m)).slice(0,10);
+    if(pinned.length){ lines.push("Pinned by the user (always in context):"); pinned.forEach(m=>{ if(!seen.has(m.id)){ seen.add(m.id); lines.push("- "+m.text); } }); }
+    if(r.hits.length){ lines.push("Relevant to this turn:"); r.hits.forEach(m=>{ if(!seen.has(m.id)){ seen.add(m.id); lines.push("- "+m.text); } }); }
+    if(r.related.length){ lines.push("Linked memories:"); r.related.forEach(m=>{ if(!seen.has(m.id)){ seen.add(m.id); lines.push("- "+m.text); } }); }
+    const recent = s.memory.slice(0,3).filter(m=>!seen.has(m.id));
+    if(recent.length){ lines.push("Recently learned:"); recent.forEach(m=>lines.push("- "+m.text)); }
+    mem = lines.join("\n") || s.memory.slice(0,10).map(m=>"- "+m.text).join("\n");
+  }
+  const perms = s.connectors.map(c=>`${c.name}: ${c.scope}`).join(", ");
+  const skills = activeSkills().map(x=>`- ${x.name}: ${x.text}`).join("\n") || "none";
+  const manifest = [
+    ...Object.entries(Tools).map(([id,t])=>`- ${id} ${t.argsHint}${t.openOnly?" (needs open network mode)":""}`),
+    ...s.customTools.filter(t=>t.status==="active").map(t=>`- ${t.name} ${t.argsHint} (custom)`),
+    ...(s.mcps.length?['- mcp_call {"server":"<name>","tool":"<tool>","arguments":{}} (needs open network mode)']:[]),
+  ].join("\n");
+  return `You are Muse, the personal agent inside Open Muse - an open-source, local-first personal agent. You behave like a capable, warm, concise assistant that DOES work, not just chats.
+Current time: ${new Date().toLocaleString()}.
+USER PROFILE - stable facts that color every turn, never wait for a matching query:
+${profile.static.map(t=>"- "+t).join("\n") || "(nothing stable learned yet)"}
+Right now: ${profile.dynamic.join(" · ") || "nothing active"}
+TOOLS - to use one, emit a fenced block exactly like: \`\`\`tool {"tool":"id","args":{...}} \`\`\` (up to 4 per turn, they chain; results come back to you, then you answer). Use tools when they genuinely help - calculate instead of guessing math, search instead of inventing facts, set reminders when asked.
+${manifest}
+Active skills (follow them):
+${skills}
+Style: talk like a person in a messaging app - warm but clipped. Short paragraphs, no headers, no bullet spam unless listing steps. Plain and direct. Use what you remember about the user naturally, the way a friend would ("still on for that 10k?"), without reciting your memory list.
+What you can do in this environment: chat, build and advance goal plans, remember facts, draft things (emails, messages, documents, checklists, plans), and prepare actions. You cannot reach the internet or real accounts directly - the Permissions panel grants scopes, and drafts are as far as anything external goes without the user doing the send.
+Current permissions: ${perms}.
+Rules:
+- If the user states a goal, say you will plan it (the app builds the plan).
+- Never claim to have sent, bought, booked or changed anything external. You draft and prepare; the user approves and executes outside.
+- Keep replies under ~120 words unless the user asks for depth.
+What you remember about the user:
+${mem}`;
+}
+
+/* ---------------- sentinel policy ---------------- */
+const SENSITIVE = /\b(send|email|message|share|post|publish|buy|purchase|pay|book|order|invite|transfer|delete|schedule)\b/i;
+function sentinelCheck(step){
+  return { sensitive: SENSITIVE.test(step.title) };
+}
+
+/* ---------------- goals engine ---------------- */
+async function createGoal(title){
+  const s=S();
+  const g={id:uid("goal"), title, created:nowISO(), status:"planning", plan:{steps:[]}};
+  s.goals.unshift(g); renderGoals(); renderStatus();
+  await audit("goal", `Goal accepted: "${title}" - planning`);
+  try{
+    const raw = await chatOnce([
+      {role:"system", content:`You are the planning core of a personal agent. Break the user's goal into 4-7 concrete steps. Output JSON only: {"steps":[{"title":"...","kind":"agent"|"user"}]}. kind "agent" = the agent can do it in chat (research, drafting, writing, planning, analysis, learning, comparison, checklists). kind "user" = strictly requires the human's body or accounts in the real world (buying groceries, physically cooking, attending). Prefer agent steps - most steps of most goals are agent-doable; a good plan usually has at most 1-2 user steps. Steps that send/share/buy/book anything must be phrased as drafts or preparations, since a human always does the final external act.`},
+      {role:"user", content:`Goal: ${title}`}
+    ], true);
+    const plan=JSON.parse(raw);
+    g.plan.steps=(plan.steps||[]).slice(0,8).map(x=>({id:uid("step"), title:String(x.title||"step"), kind:x.kind==="user"?"user":"agent", status:"todo", output:""}));
+    g.status="active";
+    await audit("plan", `Plan ready for "${title}": ${g.plan.steps.length} steps`);
+    await logWork(`Goal accepted: "${title}" - plan ready, ${g.plan.steps.length} steps`);
+    await Store.save(); renderGoals(); renderStatus();
+    return g;
+  }catch(e){
+    g.status="active";
+    g.plan.steps=[{id:uid("step"),title:"Define the first concrete move for: "+title,kind:"agent",status:"todo",output:""}];
+    await audit("plan", `Planning fell back to a seed step for "${title}" (${e.message})`);
+    await Store.save(); renderGoals(); renderStatus();
+    return g;
+  }
+}
+
+async function advanceGoal(id){
+  const s=S(); const g=s.goals.find(x=>x.id===id); if(!g) return;
+  const step=g.plan.steps.find(x=>x.status==="todo"||x.status==="approval");
+  if(!step){ g.status="done"; await audit("goal",`Goal complete: "${g.title}"`); await logWork(`Goal complete: "${g.title}"`); await Store.save(); renderGoals(); renderStatus(); toast("Goal complete."); return; }
+  if(step.kind==="user"){
+    await audit("plan",`Step needs the human: "${step.title}"`);
+    step.status="done"; g.status = g.plan.steps.every(x=>x.status==="done")?"done":"active";
+    await addMsg("muse", `I marked “${step.title}” on “${g.title}” as handled - that one was yours to do in the world. Say the word if it isn't actually done and I'll reopen it.`);
+    await Store.save(); renderAll(); return;
+  }
+  const check=sentinelCheck(step);
+  if(check.sensitive && step.status!=="approval"){
+    step.status="approval";
+    await audit("sentinel",`Paused "${step.title}" - sensitive action, needs approval`);
+    await addMsg("sys",`Sentinel paused a step on “${g.title}”.`);
+    await Store.save(); renderAll(); return;
+  }
+  await runStep(g, step);
+}
+
+async function runStep(g, step){
+  const prior = g.plan.steps.filter(x=>x.status==="done"&&x.output).map(x=>`Earlier step "${x.title}" produced:\n${x.output.slice(0,900)}`).join("\n\n");
+  step.status="doing"; renderGoals();
+  setRT({state:"working", step:step.title, tool:""});
+  await audit("action",`Running step: "${step.title}" (goal: "${g.title}")`);
+  try{
+    const out = await chatOnce([
+      {role:"system", content: systemPrompt(g.title+" "+step.title)},
+      {role:"user", content:`Execute this step of my goal and give me the finished work product, not a description of what you would do. Never say you cannot - produce the best possible artifact with what you know.\nGoal: ${g.title}\nStep: ${step.title}\n${prior}\nProduce the actual artifact (draft text, plan, analysis, checklist, etc).`}
+    ]);
+    step.output=out; step.status="done";
+    await addMsg("muse", `Done with “${step.title}” (${g.title}):\n\n${out.slice(0,1800)}`);
+    await audit("action",`Completed step: "${step.title}"`);
+    setRT({last:"Completed: "+step.title.slice(0,60)});
+  }catch(e){
+    step.status="todo";
+    setRT({last:"Failed: "+step.title.slice(0,60)});
+    await addMsg("sys", `Step “${step.title}” hit a problem: ${e.message==="no-key"?"no model key set - add it in Settings":e.message}`);
+    await audit("error",`Step failed: "${step.title}" (${e.message})`);
+  }
+  g.status = g.plan.steps.every(x=>x.status==="done") ? "done" : "active";
+  setRT({state:"idle", step:"", tool:""});
+  await Store.save(); renderAll();
+}
+
+/* ---------------- autonomy: Jules-style, honestly bounded ----------------
+   While the tab is open, Muse advances routine plan steps on its own.
+   Human steps and sentinel-flagged (sensitive) steps still stop and wait.
+   Tab closed = orb asleep = nothing runs. That boundary is the truth of a
+   static app, and the UI says it out loud. */
+const _autoErr = {};
+async function autoAdvance(goalId){
+  if(!S() || !S().settings.autonomy) return;
+  if(TEAM.active) return; // a team/swarm owns this goal's compute right now
+  const g=S().goals.find(x=>x.id===goalId); if(!g || g.status!=="active") return;
+  const step=g.plan.steps.find(x=>x.status==="todo");
+  if(!step || step.kind==="human") return;
+  setTimeout(async()=>{
+    if(!S() || !S().settings.autonomy) return;
+    if(TEAM.active) return;
+    const g2=S().goals.find(x=>x.id===goalId); if(!g2 || g2.status!=="active") return;
+    const st=g2.plan.steps.find(x=>x.id===step.id); if(!st || st.status!=="todo") return;
+    if((_autoErr[goalId]||0) >= 2){ await audit("plan",`Autonomy paused on "${g2.title}" - repeated step failures`); return; }
+    const before = S().audit.length;
+    await advanceGoal(goalId);
+    const err = S().audit.length>before && S().audit[0].kind==="error";
+    _autoErr[goalId] = err ? (_autoErr[goalId]||0)+1 : 0;
+    autoAdvance(goalId);
+  }, 1400);
+}
+async function decideStep(pair, ok){
+  const [gid,sid]=pair.split("|");
+  const g=S().goals.find(x=>x.id===gid); const st=g&&g.plan.steps.find(x=>x.id===sid); if(!st) return;
+  const card=$("#ap-"+sid);
+  // resolved decisions persist as a card message in chat history - a live DOM
+  // card would vanish on the next render, and the record is the whole point
+  const settle=async(ok)=>{
+    if(card) card.remove();
+    await addMsg("sys", `<div class="card resolved"><h4>${ok?"✓ Approved":"✕ Rejected"}</h4><div class="small"><b>${esc(st.title)}</b> - ${ok?"running it now":"skipped"}. Recorded ${new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}; the audit trail keeps both outcomes.</div></div>`, "card");
+  };
+  if(ok){
+    await audit("approval",`Approved: "${st.title}"`);
+    logWork(`Approved sensitive step "${st.title}" (goal: ${g.title})`);
+    await settle(true);
+    await runStep(g, st);
+    autoAdvance(gid);
+  } else {
+    st.status="done"; st.output="Rejected by user.";
+    await audit("approval",`Rejected: "${st.title}"`);
+    logWork(`Rejected sensitive step "${st.title}" (goal: ${g.title}) - skipped`);
+    await settle(false);
+    g.status = g.plan.steps.every(x=>x.status==="done") ? "done" : "active";
+    await Store.save(); renderAll();
+  }
+}
+
+/* ---------------- chat flow ---------------- */
+const GOAL_RE = /\b(my goal is|goal:|set a goal|new goal|i want to (?:learn|run|build|write|launch|save|get|become|finish)|help me (?:plan|prepare|get|learn|build|write|launch|email|send|draft|negotiate|make|create|organize|apply))\b/i;
+
+async function sendChat(){
+  if(!S()){ showLockScreen("Locked - enter your passphrase to continue."); return; }
+  const ta=$("#chatinput"); const text=ta.value.trim().slice(0,4000); if(!text) return;
+  ta.value=""; ta.style.height="auto";
+  await addMsg("user", text); renderChat();
+
+  // forget command handled locally, instantly
+  const fm = text.match(/^forget (?:that |about )?(.+)/i);
+  if(fm){
+    const q=fm[1].toLowerCase().trim();
+    const hits=S().memory.filter(m=>m.text.toLowerCase().includes(q.slice(0,24)) || q.split(/\s+/).some(w=>w.length>3 && m.text.toLowerCase().includes(w)));
+    if(hits.length){
+      S().memory=S().memory.filter(m=>!hits.includes(m));
+      for(const h of hits) await audit("memory",`Forgot on request: "${h.text}"`);
+      await addMsg("muse", `Forgotten. ${hits.length===1?"That memory is":"Those "+hits.length+" memories are"} gone for good.`);
+    } else {
+      await addMsg("muse", `I don't hold anything matching that. The Memory view shows everything I know - it's a short list, you can check.`);
+    }
+    await Store.save(); renderAll(); return;
+  }
+
+  // recall intent: answer from the memory list directly, no model call
+  if(/\bwhat do you (remember|know) about me\b/i.test(text)){
+    const mem=S().memory;
+    await addMsg("muse", mem.length
+      ? "Here's what I'm holding:\n\n" + mem.slice(0,12).map(m=>"- "+m.text).join("\n") + "\n\nSay \"forget <thing>\" and it's gone."
+      : "Nothing yet. As we talk I'll keep the durable stuff - and you can see all of it in Memory.");
+    await Store.save(); renderAll(); return;
+  }
+
+  // what's on my plate: instant local answer
+  if(/\bwhat'?s on my (plate|list)|\bmy tasks\b|\bshow (my )?tasks\b/i.test(text)){
+    const open=S().tasks.filter(t=>t.status==="open");
+    const rems=S().reminders.filter(r=>r.status==="pending");
+    const active=S().goals.find(g=>g.status==="active");
+    await addMsg("muse", "On your plate:\n" + (open.length? open.map(t=>"- "+t.text).join("\n") : "- no open tasks")
+      + (active? `\n\nGoal in motion: "${active.title}" - say "advance" and I keep going.` : "")
+      + (rems.length? `\n\nReminders set: ${rems.map(r=>r.text+" ("+fmtD(r.at)+")").join(", ")}` : ""));
+    await Store.save(); renderAll(); return;
+  }
+
+  // goal intent
+  if(mode()!=="chat" && GOAL_RE.test(text)){
+    const title=text.replace(/^(my goal is to|my goal is|goal:|set a goal( to)?|new goal( is)?( to)?)\s*/i,"").trim().replace(/[.!\s]+$/,"").slice(0,140);
+    const nice=title.charAt(0).toUpperCase()+title.slice(1);
+    await addMsg("muse", `On it. I'm turning “${nice}” into a plan - give me a few seconds.`);
+    renderChat();
+    learnFrom(text).catch(async e=>audit("error","memory extraction failed: "+String(e).slice(0,120)));
+    const g=await createGoal(nice);
+    const words = nice.toLowerCase().split(/\W+/).filter(w=>w.length>3);
+    const rel = retrieveMemory(text, 1).hits[0];
+    if(rel) await addMsg("sys", `Using what I remember: "${rel.text}"`);
+    await addMsg("muse", `Plan is ready: ${g.plan.steps.length} steps. It's on the Goals board - I'll advance it step by step, and anything sensitive pauses for your approval first. Say "advance" or press Advance over there.`);
+    await Store.save(); renderAll(); switchView("goals"); autoAdvance(g.id); return;
+  }
+  if(/^(advance|continue|keep going|next step)\b/i.test(text)){
+    const g=S().goals.find(x=>x.status==="active");
+    if(g){ await advanceGoal(g.id); autoAdvance(g.id); } else await addMsg("muse","No active goal right now. Give me one and I'll get moving.");
+    await Store.save(); renderAll(); return;
+  }
+
+  // ordinary chat with streaming
+  const log=$("#chatlog");
+  const el=document.createElement("div"); el.className="msg muse";
+  el.innerHTML=`<div class="body"><span class="typing"><i></i><i></i><i></i></span></div>`;
+  log.appendChild(el); log.scrollTop=log.scrollHeight;
+  setPresence("thinking");
+  const hist=S().chat.slice(-14).filter(m=>m.role!=="sys"&&!m.kind).map(m=>({role:m.role==="muse"?"assistant":m.role, content:m.text}));
+  try{
+    const m0 = mode();
+    const sys = m0==="coder" ? coderPrompt(await ownSource()) : m0==="chat" ? chatPrompt(text) : systemPrompt(text);
+    const out=await chatStream([{role:"system",content:sys}, ...hist], partial=>{ el.querySelector(".body").innerHTML=mdLite(partial); log.scrollTop=log.scrollHeight; });
+    el.remove();
+    const calls = m0==="agent" ? parseToolCalls(out) : [];
+    if(calls.length){
+      const display = out.replace(/```tool[\s\S]*?```/g,"").trim();
+      if(display){ await addMsg("muse", display); renderChat(); }
+      setPresence("working");
+      const results=[];
+      for(const c of calls){
+        const res = await execTool(c.tool, c.args);
+        results.push({tool:c.tool, result:res});
+        await toolCard(c.tool, res);
+        await audit("tool", `${c.tool}: ${res.slice(0,100)}`);
+      }
+      setPresence("thinking");
+      const fin = await chatOnce([
+        {role:"system",content:sys}, ...hist,
+        {role:"assistant",content:out},
+        {role:"user",content:"Tool results:\n"+results.map(r=>`[${r.tool}]\n${r.result}`).join("\n\n")+"\n\nAnswer the user using these results. Be brief."}
+      ], false);
+      await addMsg("muse", fin);
+      S().chat[S().chat.length-1].parts = toolCallParts(calls, results);
+      renderChat();
+    } else {
+      await addMsg("muse", out); renderChat();
+    }
+    learnFrom(text).catch(async e=>audit("error","memory extraction failed: "+String(e).slice(0,120)));
+  }catch(e){
+    el.remove();
+    await addMsg("sys", friendlyModelError(e));
+    renderChat();
+  }
+  setPresence("idle");
+  await Store.save(); renderStatus();
+}
+
+/* memory extraction: small background call, durable facts only */
+async function learnFrom(userText){
+  if(!getKey()) return;
+  const raw=await chatOnce([
+    {role:"system",content:`Extract durable personal facts worth remembering from the user's message (preferences, relationships, constraints, projects, goals). Output JSON: {"facts":["...",...]}. Facts must be third-person, specific, and useful later ("User is training for a 10k"). Skip transient chatter, questions, and anything already implied. Empty list if nothing durable.`},
+    {role:"user",content:userText}
+  ], true);
+  const facts=(JSON.parse(raw).facts||[]).slice(0,3);
+  const saved=[];
+  for(const f of facts){
+    const t=String(f).trim(); if(t.length<8) continue;
+    if(await rememberFact(t, "conversation")) saved.push(t);
+  }
+  if(saved.length){
+    renderStatus();
+    await addMsg("sys", `Muse will remember: "${saved[0]}"${saved.length>1?` (+${saved.length-1} more)`:""}`);
+    await Store.save(); renderChat();
+  }
+}
+
+/* ---------------- session distillation ----------------
+   OpenViking's session-commit pattern, honestly bounded: when the tab goes
+   hidden (and as catch-up on boot after a gap), durable facts are distilled
+   from the conversation window since the last pass. Extraction reuses the
+   Mem0-style loop, so dedupe/update applies. Runs only while a key is set. */
+async function distillSession(){
+  const s=S(); if(!s || !getKey()) return;
+  const from = s.lastDistillIdx || 0;
+  const fresh = s.chat.slice(from).filter(m=>m.role==="user" && !m.kind);
+  if(fresh.length < 3) return;
+  s.lastDistillIdx = s.chat.length;
+  await Store.save();
+  try{ await learnFrom(fresh.slice(-12).map(m=>m.text).join("\n").slice(0,2500)); }
+  catch(e){ await audit("error", "session distillation failed: "+String(e).slice(0,100)); }
+}
+document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="hidden") distillSession(); });
+
+/* ---------------- proactivity ----------------
+   THUNLP ProactiveAgent patterns (arXiv:2410.12361), local analog:
+   - "nothing" is a prediction: staying silent is a decision, and every silence
+     is audited with its reason (the local stand-in for their reward model)
+   - a persisted feedback ledger per proposal kind: proposed / accepted /
+     dismissed / ignored. Ignored proposals back the cadence off (busy signal),
+     kinds with near-zero acceptance mute themselves, accepts reset the backoff
+   - proposals are tri-state: Accept / Dismiss / do nothing (TTL = ignore)
+   - deciding costs no model call; the model only runs when you accept
+   - honest bound: proposals fire only while the orb is awake (this tab) */
+const PROPOSAL_TTL = 15*60*1000;
+function proactiveLedger(){ const s=S(); if(!s.proactivity) s.proactivity={kinds:{}, cooldownUntil:0, ignoreStreak:0, outstanding:null}; return s.proactivity; }
+function kindStats(kind){ const P=proactiveLedger(); if(!P.kinds[kind]) P.kinds[kind]={proposed:0,accepted:0,dismissed:0,ignored:0,muted:false}; return P.kinds[kind]; }
+function gateVerdict(kind){
+  const P=proactiveLedger(); const now=Date.now();
+  if(!S().settings.autonomy) return "autonomy is off";
+  if(mode()==="chat") return "chat mode - plain talk, no proposals";
+  const k=kindStats(kind);
+  if(k.muted) return `kind "${kind}" muted (acceptance ran near zero)`;
+  if(now < (P.cooldownUntil||0)) return `backing off after ignored proposals (${Math.max(1,Math.round((P.cooldownUntil-now)/60000))}m left)`;
+  if(document.querySelector(".suggest")) return "another proposal is already on screen";
+  return null;
+}
+async function resolveProposal(outcome){
+  const P=proactiveLedger(); const o=P.outstanding; if(!o) return;
+  const k=kindStats(o.kind);
+  k[outcome]=(k[outcome]||0)+1;
+  if(outcome==="accepted"){ P.ignoreStreak=0; P.cooldownUntil=0; }
+  if(outcome==="dismissed"){ P.ignoreStreak=0; P.cooldownUntil=Date.now()+30*60000; }
+  if(outcome==="ignored"){
+    P.ignoreStreak=(P.ignoreStreak||0)+1;
+    P.cooldownUntil=Date.now()+Math.min(120,30*Math.pow(2,P.ignoreStreak-1))*60000;
+  }
+  if(k.proposed>=3 && k.accepted===0 && (k.dismissed+k.ignored)>=Math.ceil(k.proposed*0.7)){
+    k.muted=true;
+    await audit("proactive", `Muted "${o.kind}" proposals for good: ${k.proposed} proposed, none accepted.`);
+  }
+  await audit("proactive", `Proposal [${o.kind}] ${outcome}`);
+  P.outstanding=null;
+  await Store.save();
+}
+async function propose(kind, html, onAccept){
+  const verdict=gateVerdict(kind);
+  if(verdict){ await audit("proactive", `Stayed silent [${kind}]: ${verdict}`); return false; }
+  const P=proactiveLedger();
+  if(P.outstanding) await resolveProposal("ignored");   // abandoned by reload = did not engage
+  const k=kindStats(kind);
+  k.proposed++; P.outstanding={kind, at:Date.now()};
+  await Store.save();
+  await audit("proactive", `Proposed [${kind}]`);
+  const c=document.createElement("div"); c.className="suggest";
+  c.innerHTML=`<div class="s-t">${html}</div><div class="s-b"><button class="btn pri" data-a="yes">Yes, go</button><button class="btn" data-a="no">Dismiss</button></div>`;
+  $("#chatlog").appendChild(c); $("#chatlog").scrollTop=1e9;
+  const done=async outcome=>{ if(!c.isConnected) return; c.remove(); await resolveProposal(outcome); };
+  c.querySelector('[data-a="yes"]').onclick=async ()=>{ await done("accepted"); onAccept&&onAccept(); };
+  c.querySelector('[data-a="no"]').onclick=()=>done("dismissed");
+  setTimeout(()=>done("ignored"), PROPOSAL_TTL);
+  return true;
+}
+/* event scan: observe in-app state -> candidates -> gate -> propose or stay silent */
+async function proactiveNudge(){
+  if(!S()) return;
+  const P=proactiveLedger();
+  if(P.outstanding && Date.now()-P.outstanding.at > PROPOSAL_TTL){ document.querySelector(".suggest")?.remove(); await resolveProposal("ignored"); }
+  const active=S().goals.find(g=>g.status==="active");
+  const pending=S().goals.flatMap(g=>g.plan.steps).filter(x=>x.status==="approval").length;
+  if(pending>0){
+    if(sessionStorage.getItem("openmuse.nudged")!==String(pending)){
+      const verdict=gateVerdict("approval");
+      if(verdict){ await audit("proactive", `Stayed silent [approval]: ${verdict}`); }
+      else{ sessionStorage.setItem("openmuse.nudged", String(pending)); await addMsg("sys",`${pending} action${pending>1?"s are":" is"} waiting for your approval below.`); await Store.save(); renderChat(); }
+    }
+    return;
+  }
+  sessionStorage.removeItem("openmuse.nudged");
+  const stale = S().tasks.find(t=>t.status==="open" && Date.now()-new Date(t.created).getTime() > 24*3600*1000);
+  if(stale){
+    await propose("stale-task", `<b>Muse, unprompted:</b> "${esc(stale.text)}" has sat open since ${new Date(stale.created).toLocaleDateString()}. Want help closing it out?`, async ()=>{
+      await addMsg("muse", `Let's close out "${esc(stale.text)}". Tell me what's blocking it - or say the word and I'll mark it done.`); await Store.save(); renderChat();
+    });
+    return;
+  }
+  if(active){
+    const step=active.plan.steps.find(x=>x.status==="todo");
+    if(step){
+      await propose("next-step", `<b>Muse, unprompted:</b> "${esc(active.title)}" is mid-plan. Next up: "${esc(step.title)}". Want me to take it?`, ()=>advanceGoal(active.id));
+      return;
+    }
+    return;
+  }
+  if(S().memory.length){
+    const cand = S().memory.find(m=>/\b(wants?|training|learning|building|planning|hoping)\b/i.test(m.text));
+    if(cand){
+      const idea = cand.text.replace(/^User (wants to|is|is training to|is learning to|hopes to)\s*/i,"").replace(/[.。]+$/,"");
+      await propose("memory-goal", `<b>Muse, unprompted:</b> you mentioned ${esc(idea)}. Want me to turn that into a real plan?`, async ()=>{ await createGoal(idea.charAt(0).toUpperCase()+idea.slice(1)); switchView("goals"); });
+      return;
+    }
+  }
+  if(!S().goals.length && S().chat.length<4 && !S().memory.length){
+    const verdict=gateVerdict("fresh-start");
+    if(verdict){ await audit("proactive", `Stayed silent [fresh-start]: ${verdict}`); return; }
+    await addMsg("muse","One thing I'm good at: give me a goal, even a big one. I'll break it into a plan and start working through it with you.");
+    await Store.save(); renderChat();
+  }
+}
+
+/* ---------------- settings ---------------- */
+async function fetchCatalog(pv){
+  const prov = PROVIDERS[pv] || PROVIDERS.openrouter;
+  const key = getKey();
+  if(pv === "tokenharbor" && !key) return null;   // TH catalog is auth-gated
+  try{
+    const r = await fetch(prov.modelsUrl, {headers: key ? {"Authorization":"Bearer "+key} : {}});
+    if(!r.ok) return null;
+    const j = await r.json();
+    const ids = (j.data||[]).map(m=>m.id).filter(Boolean);
+    return ids.length ? ids : null;
+  }catch(e){ return null; }
+}
+async function populateModelSelect(){
+  const pv = $("#setprovider").value;
+  const prov = PROVIDERS[pv] || PROVIDERS.openrouter;
+  const sel = $("#setmodel");
+  const current = S().settings.model || prov.defModel;
+  sel.innerHTML = `<option value="">loading catalog...</option>`;
+  let ids = await fetchCatalog(pv);
+  let note = "";
+  if(!ids){ ids = prov.fallback.slice(); note = pv==="tokenharbor" && !getKey() ? "enter a key to load the full catalog" : "catalog unavailable - showing common models"; }
+  // free models to the top, FREE-marked (Token Harbor convention), rest alphabetical
+  const free = ids.filter(id=>id.endsWith(":free")).sort();
+  const paid = ids.filter(id=>!id.endsWith(":free")).sort();
+  const ordered = [...free, ...paid];
+  if(current && !ordered.includes(current)) ordered.unshift(current);
+  sel.innerHTML = ordered.map(id=>{
+    const label = id.endsWith(":free") ? `FREE · ${id.replace(/:free$/,"")}` : id;
+    return `<option value="${id}" ${id===current?"selected":""}>${label}</option>`;
+  }).join("");
+  sel.value = current;
+  $("#modelhint").textContent = note || `${ordered.length} models from ${prov.name}${free.length?` - ${free.length} free`:""}`;
+}
+function syncProviderUI(){
+  const pv = $("#setprovider").value;
+  const prov = PROVIDERS[pv] || PROVIDERS.openrouter;
+  $("#setkey").placeholder = prov.keyPh;
+  $("#keyhint").textContent = prov.hint;
+}
+$("#setprovider").addEventListener("change", ()=>{ syncProviderUI(); populateModelSelect(); });
+$("#refreshmodels").addEventListener("click", populateModelSelect);
+$("#savesettings").addEventListener("click", async ()=>{
+  const k=$("#setkey").value.trim(), m=$("#setmodel").value, p=$("#setpass").value;
+  const pv=$("#setprovider").value, remember=$("#setsavekey").checked;
+  S().settings.provider = pv;
+  if(k){
+    sessionStorage.setItem("openmuse.key", k);
+    S().settings.hasKey=true;
+    if(remember) S().settings.keyStored = k;
+  }
+  if(!remember) S().settings.keyStored = "";
+  if(m && !/^[\w.:/-]{1,100}$/.test(m)){ toast("Model id has invalid characters."); return; }
+  S().settings.model = m;  // blank = provider default
+  if(p){
+    if(p.length < 8){ toast("Passphrase needs at least 8 characters."); return; }
+    $("#setpass").value = "";
+    await Store.lock(p); $("#vmstate").className="pill ok"; $("#vmstate").innerHTML='<span class="d"></span>encrypted'; $("#vmdesc").textContent="Store is AES-GCM encrypted with a key only your passphrase derives."; }
+  $("#setkey").value = "";
+  await Store.save(); renderStatus();
+  await audit("settings","Settings updated");
+  toast("Saved.");
+});
+$("#exportbtn").addEventListener("click", async ()=>{
+  if(Store.locked && Store.passKey){
+    // E2EE export: same AES-GCM envelope as the at-rest store; only your passphrase opens it
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    // encrypt under the already-derived session key; the salt of the at-rest store travels
+    // with the export so the same passphrase re-derives the key on import
+    const payload = {enc:1, v:1, kind:"open-muse-export", salt: Store._cipher.salt, iv: btoa(String.fromCharCode(...iv)), data:""};
+    const ct = await crypto.subtle.encrypt({name:"AES-GCM", iv}, Store.passKey, new TextEncoder().encode(JSON.stringify(S())));
+    let bin=""; const a8=new Uint8Array(ct); for(let i=0;i<a8.length;i+=0x8000) bin+=String.fromCharCode(...a8.subarray(i,i+0x8000));
+    payload.data = btoa(bin);
+    const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+    const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="open-muse-export.encrypted.json"; a.click();
+    await audit("settings","Encrypted export downloaded (AES-GCM, passphrase-derived key)");
+    toast("Encrypted export downloaded - only your passphrase opens it.");
+  } else {
+    openModal(`<h3>Export is unencrypted</h3><div class="sub">No passphrase is set, so this export is plain JSON anyone can read. Set a Personal VM passphrase to make exports end-to-end encrypted.</div>
+    <div class="row"><button class="btn modal-cancel">Cancel</button><button class="btn pri" id="plainexp">Export anyway</button></div>`);
+    $("#plainexp").onclick=async ()=>{
+      const blob=new Blob([JSON.stringify(S(),null,2)],{type:"application/json"});
+      const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="open-muse-export.json"; a.click();
+      closeModal(); await audit("settings","Unencrypted export downloaded");
+    };
+  }
+});
+$("#wipeallbtn").addEventListener("click", async ()=>{
+  openModal(`<h3>Erase everything?</h3><div class="sub">Chat, goals, memory, audit and settings are wiped from this browser. There is no copy anywhere else - that is the point of Open Muse.</div>
+  <div class="row"><button class="btn modal-cancel">Cancel</button><button class="btn badb" id="yeswipe">Erase</button></div>`);
+  $("#yeswipe").onclick=()=>{ Store.wipe(); sessionStorage.clear(); location.reload(); };
+});
+$("#wipemembtn").addEventListener("click", async ()=>{
+  S().memory=[]; await audit("memory","All memories forgotten on request"); await Store.save(); renderMemory(); renderStatus(); toast("All memories forgotten.");
+});
+$("#newgoalbtn").addEventListener("click", ()=>{
+  openModal(`<h3>New goal</h3><div class="sub">State it plainly. Muse will break it into steps and start advancing them.</div>
+  <div class="field"><input id="ngoal" placeholder="e.g. train for a 10k in 10 weeks"></div>
+  <div class="row"><button class="btn modal-cancel">Cancel</button><button class="btn pri" id="gogoal">Plan it</button></div>`);
+  $("#gogoal").onclick=async ()=>{ const v=$("#ngoal").value.trim(); if(!v) return; closeModal(); await createGoal(v.charAt(0).toUpperCase()+v.slice(1)); };
+});
+
+/* composer */
+const ta=$("#chatinput");
+ta.addEventListener("input",()=>{ ta.style.height="auto"; ta.style.height=Math.min(ta.scrollHeight,160)+"px"; });
+ta.addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); sendChat(); } });
+$("#sendbtn").addEventListener("click", sendChat);
+
+
+/* ---------------- modes: agent | coder ---------------- */
+const mode = () => (S().settings.mode || "agent");
+function applyModeUI(){
+  const m = mode();
+  $$(".modebtn").forEach(b=>b.classList.toggle("on", b.dataset.mode===m));
+  $("#modebar").classList.toggle("coder", m==="coder");
+  $("#modenote").textContent = m==="coder"
+    ? "Coding agent - reads its own source, drafts diffs; patches never self-apply"
+    : m==="chat"
+    ? "Plain chat - just talk; Muse still remembers quietly"
+    : "Personal agent";
+  const mob = matchMedia("(max-width:820px)").matches;
+  $("#chatinput").placeholder = m==="coder"
+    ? (mob ? "Ask Muse to change its code..." : "Ask Muse to change its own code...  (diffs go through Evolve gates + your approval)")
+    : m==="chat"
+    ? (mob ? "Just talk - no plans or approvals here" : "Just talk - ask anything, think out loud, no plans or approvals here")
+    : (mob ? "What needs to get done?" : "Tell Muse what needs to get done...  (try: 'my goal is to run a 10k in 10 weeks')");
+}
+async function setMode(m){
+  S().settings.mode = m;
+  await Store.save();
+  applyModeUI();
+  await audit("mode", `Mode switched to ${m}`);
+}
+$$(".modebtn").forEach(b=>b.addEventListener("click", ()=>setMode(b.dataset.mode)));
+
+let _srcCache = null;
+async function ownSource(){
+  if(_srcCache) return _srcCache;
+  const files = {};
+  for(const f of ["index.html","styles.css","app.js"]){
+    try{ const r = await fetch(f); if(r.ok) files[f] = (await r.text()).slice(0, 60000); }catch(e){}
+  }
+  _srcCache = files; return files;
+}
+function coderPrompt(src){
+  const listing = Object.entries(src).map(([f,c])=>`--- ${f} (${c.length} chars) ---\n${c}`).join("\n\n");
+  return `You are Muse in CODER MODE - a coding agent working on Open Muse's own source, an open-source local-first personal agent web app. The full current source is included below.
+How you work:
+- Plan in code steps: say what you will change and why, then produce the change.
+- Code goes in fenced blocks with the language (\`\`\`js, \`\`\`html, \`\`\`css). When editing existing code, produce a unified diff in a \`\`\`diff block (+ / - / @@ lines) against the source below.
+- Review your own diff before finishing: one short paragraph on risks and what to test. Suggest the Self-tests button after any change.
+Honesty rules:
+- You CANNOT apply changes. A static page cannot rewrite its deployed code. When a patch is ready, offer: "Turn this into an Evolve proposal?" - proposals pass hard gates and the user's approval, then export as a patch bundle or hand to Instinct.
+- Never invent files or features not in the source below. No external services beyond openrouter.ai and tokenharbor.ai. Never include API keys, tokens or secrets.
+Style: clipped, precise, engineer-to-engineer. Short prose; the code does the talking.
+CURRENT APP SOURCE:
+${listing}`;
+}
+
+/* ---------------- evolve: recursive self-improvement ----------------
+   Proposal-and-approve, honestly: Muse drafts a concrete improvement with
+   the model, hard gates evaluate it, the human decides. A static Pages app
+   cannot rewrite itself, so approval yields a patch bundle download or a
+   structured hand-off to Instinct. Failed attempts stay logged. */
+const EVOLVE_ENGINE = "deepseek-v4.1-flash:free";   // Token Harbor :free route - the loop engine
+const EVOLVE_HOSTS = ["openrouter.ai","tokenharbor.ai"];
+const EVO_SECRET_RES = [ /thk_live_[A-Za-z0-9]{6,}/, /sk-or-[A-Za-z0-9._-]{6,}/, /\bsk-[A-Za-z0-9]{20,}/, /gh[pousr]_[A-Za-z0-9]{20,}/, /github_pat_[A-Za-z0-9_]{20,}/, /BEGIN [A-Z ]*PRIVATE KEY/, /(?:password|passwd|api[_-]?key|secret)\s*[:=]\s*["'][^"'\s]{8,}/i ];
+
+async function runSelfTests(){
+  const out = [];
+  try{ const k="openmuse.selftest"; localStorage.setItem(k,"1"); const ok=localStorage.getItem(k)==="1"; localStorage.removeItem(k); out.push({name:"storage roundtrip",pass:ok}); }
+  catch(e){ out.push({name:"storage roundtrip",pass:false,note:String(e).slice(0,80)}); }
+  try{
+    const k=await crypto.subtle.generateKey({name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
+    const iv=crypto.getRandomValues(new Uint8Array(12));
+    const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv},k,new TextEncoder().encode("muse"));
+    const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv},k,ct);
+    out.push({name:"AES-GCM roundtrip",pass:new TextDecoder().decode(pt)==="muse"});
+  }catch(e){ out.push({name:"AES-GCM roundtrip",pass:false,note:String(e).slice(0,80)}); }
+  out.push({name:"model key configured",pass:!!getKey(),note:getKey()?"":"add a key in Settings to draft proposals"});
+  return out;
+}
+
+function proposalGates(p){
+  const chg = Array.isArray(p.changes) ? p.changes : [];
+  const gates = [
+    {name:"schema: title + rationale + at least one change", pass: !!(p.title && p.rationale && chg.length)},
+    {name:"size: max 8 changes, patch <= 20000 chars", pass: chg.length<=8 && chg.every(c=>(c.patch||"").length<=20000)},
+    {name:"targets only app files (index.html / app.js / styles.css / README.md)", pass: chg.every(c=>/^(index\.html|app\.js|styles\.css|README\.md)$/.test(c.file||""))},
+  ];
+  const all = [p.title, p.rationale, ...chg.map(c=>(c.description||"")+"\n"+(c.patch||""))].join("\n");
+  const hits = EVO_SECRET_RES.filter(re=>re.test(all));
+  gates.push({name:"secret scan (thk_live_, sk-, ghp_, private keys, passwords)", pass:hits.length===0, note:hits.length?("matched: "+hits.map(r=>r.source).join(", ").slice(0,110)):""});
+  const bad = [...new Set([...all.matchAll(/https:\/\/([a-zA-Z0-9.-]+)/g)].map(m=>m[1]))].filter(h=>!EVOLVE_HOSTS.some(x=>h===x||h.endsWith("."+x)));
+  gates.push({name:"no external calls beyond allowlist (openrouter.ai, tokenharbor.ai)", pass:bad.length===0, note:bad.length?("found: "+bad.join(", ")):""});
+  return gates;
+}
+
+function addEvolution(p, meta){
+  const e = { id: uid("evo"), ts: nowISO(), ask: meta.ask || "", source: meta.source || "user",
+    title: String(p.title||"Untitled").slice(0,140), rationale: String(p.rationale||"").slice(0,2000),
+    changes: (Array.isArray(p.changes)?p.changes:[]).slice(0,8).map(c=>({file:String(c.file||"").slice(0,40), description:String(c.description||"").slice(0,500), patch:String(c.patch||"").slice(0,20000)})),
+    testPlan: (Array.isArray(p.testPlan)?p.testPlan:[]).slice(0,10).map(t=>String(t).slice(0,200)),
+    status: "draft", attempts: 0 };
+  S().evolutions.unshift(e);
+  if(S().evolutions.length > 30) S().evolutions.length = 30;
+  return e;
+}
+
+async function evaluateEvolution(id){
+  const e = S().evolutions.find(x=>x.id===id); if(!e) return;
+  const tests = await runSelfTests();
+  const gates = proposalGates(e);
+  const pass = tests.every(t=>t.pass) && gates.every(g=>g.pass);
+  e.eval = { at: nowISO(), tests, gates, pass };
+  e.status = pass ? "evaluated" : "failed";
+  if(!pass) e.attempts = (e.attempts||0) + 1;
+  await audit("evolve", pass
+    ? `Proposal passed all gates: "${e.title}"`
+    : `Proposal FAILED gates (attempt ${e.attempts||1}): "${e.title}" - ${gates.filter(g=>!g.pass).map(g=>g.name).join("; ").slice(0,140)}`);
+  await Store.save(); renderEvolutions();
+}
+
+async function draftEvolution(ask){
+  if(!getKey()){ toast("Add a model key in Settings first."); switchView("settings"); return; }
+  const btn=$("#evodraft"); btn.disabled=true; btn.textContent="Drafting...";
+  try{
+    const engine = S().settings.provider==="tokenharbor" ? EVOLVE_ENGINE : activeModel();
+    const raw = await chatOnce([
+      {role:"system",content:`You are the self-improvement engine of Open Muse - an open-source, local-first personal agent web app, three static files: index.html (UI shell), styles.css (dark refined theme), app.js (all logic: local store with optional AES-GCM encryption, chat, goals/plans, memory, audit trail, permissions model, model providers OpenRouter + Token Harbor, coder mode, this evolve module).
+Propose ONE concrete, high-value improvement as strict JSON: {"title":"...","rationale":"...","changes":[{"file":"app.js","description":"...","patch":"unified diff or replacement snippet"}],"testPlan":["..."]}.
+Hard rules: original code only; patches small and self-contained; no external services beyond openrouter.ai and tokenharbor.ai; never include API keys or secrets; files limited to index.html, app.js, styles.css, README.md.`},
+      {role:"user",content: ask || "Look at the app description and propose the single highest-value improvement."}
+    ], true, engine);
+    let p; try{ p = JSON.parse(raw); }catch(e2){ throw new Error("model returned non-JSON"); }
+    const e = addEvolution(p, {ask: ask || "(Muse picked)", source: ask ? "user" : "muse"});
+    await audit("evolve", `Drafted proposal: "${e.title}" (engine: ${engine})`);
+    await Store.save(); renderEvolutions();
+    await evaluateEvolution(e.id);   // isolated attempt: draft -> gates immediately, failures logged
+  }catch(e3){
+    toast("Draft failed: "+String(e3.message||e3).slice(0,90));
+  }finally{ btn.disabled=false; btn.textContent="Draft proposal"; }
+}
+
+async function proposalFromChat(){
+  const last = [...S().chat].reverse().find(m=>m.role==="muse" && /```/.test(m.text));
+  if(!last){ toast("No code or diff in chat yet."); return; }
+  if(!getKey()){ toast("Add a model key in Settings first."); return; }
+  toast("Structuring proposal...");
+  try{
+    const raw = await chatOnce([
+      {role:"system",content:`Structure this coding output into an Open Muse improvement proposal as strict JSON: {"title":"...","rationale":"...","changes":[{"file":"app.js","description":"...","patch":"unified diff or replacement snippet"}],"testPlan":["..."]}. Files limited to index.html, app.js, styles.css, README.md. No secrets, no external hosts beyond openrouter.ai and tokenharbor.ai.`},
+      {role:"user",content: last.text.slice(0,24000)}
+    ], true, S().settings.provider==="tokenharbor" ? EVOLVE_ENGINE : activeModel());
+    const p = JSON.parse(raw);
+    const e = addEvolution(p, {ask:"from a coder-mode diff", source:"coder"});
+    await audit("evolve", `Coder-mode diff became proposal: "${e.title}"`);
+    await Store.save(); switchView("evolve");
+    await evaluateEvolution(e.id);
+  }catch(e2){ toast("Could not structure that diff: "+String(e2.message||e2).slice(0,80)); }
+}
+
+async function decideEvolution(id, ok){
+  const e = S().evolutions.find(x=>x.id===id); if(!e) return;
+  if(ok && (!e.eval || !e.eval.pass)){ toast("Gates must pass before approval."); return; }
+  e.status = ok ? "approved" : "rejected";
+  await logWork(`Evolve proposal "${e.title}" ${ok?"approved - patch bundle ready to hand off":"rejected"}`);
+  e.decidedAt = nowISO();
+  await audit("evolve", `${ok?"Approved":"Rejected"} proposal: "${e.title}"`);
+  await Store.save(); renderEvolutions();
+}
+
+async function downloadBundle(id){
+  const e = S().evolutions.find(x=>x.id===id); if(!e) return;
+  const bundle = { app:"open-muse", kind:"evolve-proposal", created: nowISO(), approvedAt: e.decidedAt,
+    proposal: { title:e.title, rationale:e.rationale, changes:e.changes, testPlan:e.testPlan },
+    eval: e.eval,
+    note: "Approved by the user in-app. Apply via the repo, re-run the secret scan and gates, deploy, verify live." };
+  const blob = new Blob([JSON.stringify(bundle,null,2)], {type:"application/json"});
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `open-muse-evolve-${e.id}.json`; a.click();
+  await audit("evolve", `Patch bundle downloaded: "${e.title}"`);
+}
+
+async function instinctHandoff(id){
+  const e = S().evolutions.find(x=>x.id===id); if(!e) return;
+  const g = e.eval ? e.eval.gates : [];
+  const msg = `Open Muse improvement - I approved it in the app, please apply it.
+
+Title: ${e.title}
+Why: ${e.rationale}
+Gates: ${g.filter(x=>x.pass).length}/${g.length} passed${e.eval ? ` (evaluated ${e.eval.at})` : ""}
+Changes:
+${e.changes.map((c,i)=>`${i+1}. ${c.file} - ${c.description}\n${c.patch}`).join("\n\n")}
+Test plan: ${e.testPlan.join("; ") || "-"}
+
+Please review, apply to aeiouvcode/open-muse, re-run the secret scan, deploy, and verify live before calling it done.`;
+  let copied = false;
+  try{ await navigator.clipboard.writeText(msg); copied = true; }catch(e2){}
+  openModal(`<h3>Hand this to Instinct</h3><div class="sub">${copied ? "Copied to your clipboard. " : ""}Paste this to Instinct in your chat - it reviews, applies, tests and redeploys. Nothing changes until it reports back.</div>
+    <textarea readonly style="width:100%;min-height:220px;font-size:12px">${esc(msg)}</textarea>
+    <div class="row"><button class="btn modal-cancel">Done</button></div>`);
+  await audit("evolve", `Proposal handed to Instinct: "${e.title}"`);
+}
+
+function renderEvolutions(){
+  const cnt = $("#evocount"); if(cnt) cnt.textContent = S() ? S().evolutions.length : 0;
+  const box = $("#evolist"); if(!box || !S()) return;
+  const hint = $("#evohint");
+  if(hint) hint.textContent = S().settings.provider==="tokenharbor"
+    ? "Loop engine: deepseek-v4.1-flash:free (Token Harbor - :free models never charge)"
+    : "Loop engine: your selected model. Switch to Token Harbor in Settings to run the loop free on deepseek-v4.1-flash:free.";
+  const list = S().evolutions;
+  if(!list.length){
+    box.innerHTML = `<div class="small" style="color:var(--dim)">No proposals yet. Describe an improvement above - or leave it blank and let Muse pick. Failed attempts stay logged here, nothing is hidden.</div>`;
+    return;
+  }
+  box.innerHTML = list.map(e=>{
+    const pillCls = e.status==="approved"||e.status==="evaluated" ? "ok" : (e.status==="failed"||e.status==="rejected") ? "bad" : "warn";
+    const evalHtml = e.eval ? `<div class="gates">${[...e.eval.tests, ...e.eval.gates].map(g=>
+      `<div class="g"><span class="pill ${g.pass?"ok":"bad"}"><span class="d"></span>${g.pass?"pass":"fail"}</span><span>${esc(g.name)}${g.note?` <span style="color:var(--dim2)">- ${esc(g.note)}</span>`:""}</span></div>`).join("")}</div>` : "";
+    const chgHtml = e.changes.map(c=>`<div class="chg"><b>${esc(c.file)}</b> - ${esc(c.description)}${c.patch?`<pre>${esc(c.patch)}</pre>`:""}</div>`).join("");
+    let btns = "";
+    if(e.status==="draft" || e.status==="failed") btns += `<button class="btn" data-evoeval="${e.id}">${e.status==="failed"?"Re-run gates":"Run gates"}</button>`;
+    if(e.status==="evaluated") btns += `<button class="btn okb" data-evoapp="${e.id}">Approve</button><button class="btn badb" data-evorej="${e.id}">Reject</button>`;
+    if(e.status==="approved") btns += `<button class="btn pri" data-evodl="${e.id}">Download patch bundle</button><button class="btn" data-evoinst="${e.id}">Hand to Instinct</button>`;
+    btns += `<button class="btn" data-evodel="${e.id}">Remove</button>`;
+    return `<div class="evo">
+      <h3><span class="pill ${pillCls}"><span class="d"></span>${e.status}</span> ${esc(e.title)}</h3>
+      <div class="meta">${fmtD(e.ts)} - ${e.source === "coder" ? "from coder mode" : e.source === "muse" ? "Muse's own pick" : "your ask"}${e.attempts ? ` - ${e.attempts} failed attempt${e.attempts>1?"s":""}` : ""}</div>
+      <div class="why">${esc(e.rationale)}</div>
+      ${chgHtml}
+      ${e.testPlan.length?`<div class="meta">Test plan: ${e.testPlan.map(esc).join("; ")}</div>`:""}
+      ${evalHtml}
+      <div class="row">${btns}</div>
+    </div>`;
+  }).join("");
+  $$("#evolist [data-evoeval]").forEach(b=>b.onclick=()=>evaluateEvolution(b.dataset.evoeval));
+  $$("#evolist [data-evoapp]").forEach(b=>b.onclick=()=>decideEvolution(b.dataset.evoapp, true));
+  $$("#evolist [data-evorej]").forEach(b=>b.onclick=()=>decideEvolution(b.dataset.evorej, false));
+  $$("#evolist [data-evodl]").forEach(b=>b.onclick=()=>downloadBundle(b.dataset.evodl));
+  $$("#evolist [data-evoinst]").forEach(b=>b.onclick=()=>instinctHandoff(b.dataset.evoinst));
+  $$("#evolist [data-evodel]").forEach(b=>b.onclick=async ()=>{ const i=S().evolutions.findIndex(x=>x.id===b.dataset.evodel); if(i>=0){ S().evolutions.splice(i,1); await Store.save(); renderEvolutions(); } });
+}
+$("#evodraft").addEventListener("click", ()=>draftEvolution($("#evoask").value.trim().slice(0,1000)));
+$("#evoself").addEventListener("click", async ()=>{
+  const tests = await runSelfTests();
+  openModal(`<h3>Self-tests</h3><div class="gates" style="margin-top:10px">${tests.map(t=>`<div class="g"><span class="pill ${t.pass?"ok":"bad"}"><span class="d"></span>${t.pass?"pass":"fail"}</span> ${esc(t.name)}${t.note?` <span style="color:var(--dim2)">- ${esc(t.note)}</span>`:""}</div>`).join("")}</div>
+    <div class="row" style="margin-top:12px"><button class="btn modal-cancel">Close</button></div>`);
+});
+$("#selftestsbtn").addEventListener("click", ()=>$("#evoself").click());
+$("#diff2prop").addEventListener("click", proposalFromChat);
+
+/* tasks */
+$("#addtaskbtn").addEventListener("click", async()=>{ const v=$("#newtask").value.trim(); if(!v) return; $("#newtask").value=""; await addTask(v); });
+$("#newtask").addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); $("#addtaskbtn").click(); } });
+
+/* tools view wiring */
+$("#savesearch").addEventListener("click", async()=>{
+  S().settings.searchProvider = $("#searchpv").value;
+  const k = $("#searchkey").value.trim().slice(0,200);
+  if(k) S().settings.searchKey = k;
+  $("#searchkey").value = "";
+  await Store.save(); renderTools();
+  await audit("settings","Search settings saved");
+  toast("Saved.");
+});
+$("#savemonid").addEventListener("click", async()=>{
+  const k = $("#monidkey").value.trim().slice(0,200);
+  if(k) S().settings.monidKey = k;
+  $("#monidkey").value = "";
+  await Store.save(); renderTools();
+  await audit("settings","Monid key saved");
+  toast("Saved.");
+});
+$("#opennet").addEventListener("change", async()=>{
+  S().settings.openNetwork = $("#opennet").checked;
+  applyNetPolicy();
+  await audit("settings", "Open network mode "+(S().settings.openNetwork?"ON - connect policy widened to https:/wss:":"off - tight allowlist restored"));
+  await Store.save();
+  toast(S().settings.openNetwork ? "Open network on - Muse can fetch pages and reach MCP servers." : "Open network off.");
+});
+$("#addskillbtn").addEventListener("click", ()=>{
+  openModal(`<h3>New skill</h3><div class="sub">A name and the workflow instructions Muse should follow when it applies.</div>
+    <div class="field"><input id="nskil" placeholder="e.g. Standup writer" maxlength="60"></div>
+    <div class="field"><textarea id="nskiltext" rows="4" placeholder="When writing my standup: yesterday/today/blockers, three lines max, plain tone." maxlength="1200"></textarea></div>
+    <div class="row"><button class="btn modal-cancel">Cancel</button><button class="btn pri" id="goskil">Save skill</button></div>`);
+  $("#goskil").onclick=async()=>{ const n=$("#nskil").value.trim(), t=$("#nskiltext").value.trim();
+    if(!n||!t) return; closeModal();
+    S().userSkills.push({id:uid("sk"), name:n.slice(0,60), text:t.slice(0,1200)});
+    await audit("skill",`Skill added: "${n}"`); await Store.save(); renderSkills(); };
+});
+$("#addmcpbtn").addEventListener("click", ()=>{
+  if(!S().settings.openNetwork){ toast("MCP needs open network mode - turn it on above first."); return; }
+  openModal(`<h3>Add MCP server</h3><div class="sub">Remote server over HTTP (streamable transport). It must answer browser cross-origin requests - local stdio servers cannot work from any web page.</div>
+    <div class="field"><input id="nmcp" placeholder="name" maxlength="40"></div>
+    <div class="field"><input id="nmcpurl" placeholder="https://.../mcp" maxlength="200"></div>
+    <div class="field"><input id="nmcpkey" type="password" placeholder="auth token (optional - stays in your VM)" maxlength="200"></div>
+    <div class="row"><button class="btn modal-cancel">Cancel</button><button class="btn pri" id="gomcp">Add &amp; discover</button></div>`);
+  $("#gomcp").onclick=async()=>{ const n=$("#nmcp").value.trim(), u=$("#nmcpurl").value.trim(), k=$("#nmcpkey").value.trim();
+    if(!n||!/^(https:\/\/|http:\/\/(localhost|127\.0\.0\.1))/.test(u)) { toast("Need a name and an https URL (http only for localhost)."); return; }
+    closeModal();
+    const srv={id:uid("mcp"), name:n.slice(0,40), url:u.slice(0,200), key:k.slice(0,200), tools:[]};
+    S().mcps.push(srv); await Store.save(); renderMcps();
+    try{ await mcpDiscover(srv.id); toast(`Connected - ${srv.tools.length} tools found.`); }catch(e){ toast("Added, but discovery failed: "+String(e).slice(0,60)); }
+  };
+});
+$("#buildtoolbtn").addEventListener("click", ()=>{
+  openModal(`<h3>Have Muse build a tool</h3><div class="sub">Describe the tool. Muse writes the code, runs the gates and a sandbox test, then you approve it into the registry.</div>
+    <div class="field"><input id="btask" placeholder="e.g. a tool that converts CSV to JSON" maxlength="200"></div>
+    <div class="row"><button class="btn modal-cancel">Cancel</button><button class="btn pri" id="gobtool">Build it</button></div>`);
+  $("#gobtool").onclick=async()=>{ const v=$("#btask").value.trim(); if(!v) return; closeModal();
+    toast("Muse is building the tool...");
+    try{ await buildCustomTool(v); }catch(e){ toast("Build failed: "+String(e.message||e).slice(0,70)); }
+  };
+});
+
+/* studio wiring */
+$("#newappbtn").addEventListener("click", ()=>{
+  if(!getKey()){ toast("Add a model key in Settings first."); return; }
+  openModal(`<h3>New mini-app</h3><div class="sub">Describe it in a line. Muse writes a single-file app - self-contained, secret-scanned, no external calls - and keeps it in your VM.</div>
+    <div class="field"><input id="nappdesc" placeholder="e.g. a pomodoro timer with session stats" maxlength="200"></div>
+    <div class="row"><button class="btn modal-cancel">Cancel</button><button class="btn pri" id="gonapp">Build it</button></div>`);
+  $("#gonapp").onclick=async()=>{ const v=$("#nappdesc").value.trim(); if(!v) return; closeModal();
+    toast("Muse is building the app...");
+    try{ const name=await genMiniApp(v); toast(`Built "${name}".`); }catch(e){ toast("Build failed: "+String(e.message||e).slice(0,70)); }
+  };
+});
+
+
+/* ---------------- presence: the orb's state of life ---------------- */
+function setPresence(state){
+  const d = document.querySelector("#presence"); if(!d) return;
+  d.className = "dot " + state; d.id = "presence";
+  if(state==="idle") setRT({state:"idle", step:"", tool:""});
+  else if(state==="thinking") setRT({state:"working", step:RT.step && RT.step!=="Thinking" ? RT.step : "Thinking", tool:""});
+  else if(state==="working") setRT({state:"working", step:"Using tools"});
+}
+
+/* ---------------- tools ---------------- */
+function runSandboxed(code, prelude){
+  return new Promise(resolve=>{
+    let worker;
+    try{
+      const wrapped = `${prelude||""}
+const __logs=[]; const console={log:(...a)=>__logs.push(a.map(x=>{try{return typeof x==="object"?JSON.stringify(x):String(x)}catch(e){return String(x)}}).join(" "))};
+Promise.resolve((async()=>{ ${code} })()).then(r=>postMessage({logs:__logs,result:(()=>{try{return typeof r==="object"?JSON.stringify(r):String(r)}catch(e){return String(r)}})()})).catch(e=>postMessage({logs:__logs,error:String(e)}));`;
+      worker = new Worker(URL.createObjectURL(new Blob([wrapped],{type:"application/javascript"})));
+    }catch(e){ resolve("sandbox unavailable: "+String(e).slice(0,80)); return; }
+    const to = setTimeout(()=>{ worker.terminate(); resolve("(killed: 5 second limit)"); }, 5000);
+    worker.onmessage = e=>{ clearTimeout(to); worker.terminate();
+      const d = e.data||{};
+      resolve((d.logs&&d.logs.length ? d.logs.join("\n")+"\n" : "") + (d.error ? "Error: "+String(d.error).slice(0,200) : "→ "+String(d.result).slice(0,1500)));
+    };
+    worker.onerror = e=>{ clearTimeout(to); worker.terminate(); resolve("Error: "+String(e.message||"script error").slice(0,200)); };
+  });
+}
+function calcEval(expr){
+  const tokens = String(expr).slice(0,200).match(/(\d+\.?\d*)|[+\-*/%^()]/g) || [];
+  if(tokens.join("") !== String(expr).slice(0,200).replace(/\s/g,"")) throw new Error("numbers and + - * / % ^ ( ) only");
+  let pos=0; const peek=()=>tokens[pos], next=()=>tokens[pos++];
+  function pExpr(){ let v=pTerm(); while(peek()==="+"||peek()==="-"){ const op=next(), r=pTerm(); v = op==="+"? v+r : v-r; } return v; }
+  function pTerm(){ let v=pPow(); while(peek()==="*"||peek()==="/"||peek()==="%"){ const op=next(), r=pPow(); v = op==="*"? v*r : op==="/"? v/r : v%r; } return v; }
+  function pPow(){ let v=pUnary(); if(peek()==="^"){ next(); v=Math.pow(v,pPow()); } return v; }
+  function pUnary(){ if(peek()==="-"){ next(); return -pUnary(); } return pAtom(); }
+  function pAtom(){ const t=next(); if(t==="("){ const v=pExpr(); if(next()!==")") throw new Error("unbalanced parens"); return v; } const n=parseFloat(t); if(isNaN(n)) throw new Error("bad number"); return n; }
+  const v = pExpr();
+  if(pos!==tokens.length) throw new Error("could not parse");
+  if(!isFinite(v)) throw new Error("result not finite");
+  return String(Math.round(v*1e10)/1e10);
+}
+async function webSearch(q){
+  const pv = S().settings.searchProvider || "tinyfish", key = S().settings.searchKey;
+  if(!key) throw new Error("needs a search API key - add one in Tools (TinyFish's key is free, no card)");
+  if(pv==="tinyfish"){
+    const r = await fetch("https://api.search.tinyfish.ai?query="+encodeURIComponent(q)+"&language=en", {headers:{"X-API-Key":key}});
+    if(!r.ok) throw new Error("tinyfish "+r.status);
+    const j = await r.json();
+    return (j.results||[]).slice(0,6).map(x=>`- ${x.title||x.url}: ${x.url}\n  ${String(x.snippet||x.content||x.description||"").slice(0,180)}`).join("\n") || "(no results)";
+  }
+  if(pv==="tavily"){
+    const r = await fetch("https://api.tavily.com/search",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({api_key:key, query:q, max_results:5})});
+    if(!r.ok) throw new Error("tavily "+r.status);
+    const j = await r.json();
+    return (j.results||[]).map(x=>`- ${x.title}: ${x.url}\n  ${String(x.content||"").slice(0,180)}`).join("\n") || "(no results)";
+  }
+  const r = await fetch("https://api.search.brave.com/res/v1/web/search?q="+encodeURIComponent(q)+"&count=5",{headers:{"X-Subscription-Token":key,"Accept":"application/json"}});
+  if(!r.ok) throw new Error("brave "+r.status);
+  const j = await r.json();
+  return (j.web&&j.web.results||[]).map(x=>`- ${x.title}: ${x.url}\n  ${String(x.description||"").slice(0,180)}`).join("\n") || "(no results)";
+}
+
+/* ---------------- Monid: a catalog of live data endpoints ----------------
+   discover -> inspect -> run, exactly how the Monid CLI drives it, straight
+   from the browser. Auth is the user's own Bearer key; runs spend their
+   Monid balance, so results report cost and the tool descriptions say so. */
+async function monidApi(method, path, body){
+  const key = S().settings.monidKey;
+  if(!key) throw new Error("needs a Monid key - add one in Tools (app.monid.ai/access/api-keys)");
+  let r;
+  try{
+    r = await fetch("https://api.monid.ai"+path, {
+      method,
+      headers:{"Authorization":"Bearer "+key, "Content-Type":"application/json", "X-Monid-Client":"open-muse"},
+      body: body ? JSON.stringify(body) : undefined
+    });
+  }catch(e){ const err = new Error("network"); err.corsBlocked = true; throw err; }
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error((j.error && j.error.message) || j.message || ("monid "+r.status));
+  return j;
+}
+function monidCorsNote(e){
+  return e && e.corsBlocked
+    ? "Monid's API only answers browser calls from its own domains (app.monid.ai) - a static page on any other origin is CORS-blocked, and no app code can change that. The Monid CLI (npm i -g @monid-ai/cli) works outside the browser."
+    : "Error: "+String(e && e.message || e).slice(0,200);
+}
+
+const Tools = {
+  get_time:    { name:"Get time", argsHint:"{}", badge:"real", desc:"Current date and time.", run: async()=> new Date().toLocaleString() },
+  calc:        { name:"Calculator", argsHint:'{"expression":"2+2*10"}', badge:"real", desc:"Arithmetic parser - no eval, numbers and operators only.",
+                 run: async a=> calcEval(a.expression || a.expr || "") },
+  run_js:      { name:"Run JavaScript", argsHint:'{"code":"console.log(1+1)"}', badge:"sandboxed", desc:"JS in an isolated worker - no DOM, no storage, 5s limit. A sandbox, not a real shell.",
+                 run: async a=>{ if(typeof Worker==="undefined") throw new Error("this browser has no Web Workers - sandbox unavailable"); return runSandboxed(String(a.code||"").slice(0,8000)); } },
+  web_search:  { name:"Web search", argsHint:'{"query":"..."}', badge:"key needed", desc:"Live web search via your own key - TinyFish (free, no card), Tavily or Brave.",
+                 run: async a=> webSearch(String(a.query||"").slice(0,300)) },
+  monid_discover: { name:"Monid discover", argsHint:'{"query":"flight prices"}', badge:"CORS-blocked", desc:"Search Monid's catalog of hundreds of live data endpoints. Honest limit: Monid's API refuses browser calls from any origin but its own, so this only works if Monid opens CORS - until then it reports the block instead of pretending.",
+                 run: async a=>{ try{ const j=await monidApi("POST","/v1/discover",{query:String(a.query||"").slice(0,300),limit:5});
+                   const arr=j.results||j.endpoints||j.data||[];
+                   return arr.slice(0,5).map(e=>`- ${e.provider||"?"} ${e.endpoint||e.path||""} :: ${String(e.description||e.name||"").slice(0,120)}${e.metrics&&e.metrics.status?" ["+e.metrics.status+"]":""}`).join("\n") || JSON.stringify(j).slice(0,800);
+                   }catch(e){ return monidCorsNote(e); } } },
+  monid_inspect: { name:"Monid inspect", argsHint:'{"provider":"apify","endpoint":"/..."}', badge:"CORS-blocked", desc:"Read one Monid endpoint's input schema. Same browser-origin limit as Monid discover.",
+                 run: async a=>{ try{ const j=await monidApi("POST","/v1/inspect",{provider:String(a.provider||"").slice(0,80),endpoint:String(a.endpoint||"").slice(0,200)});
+                   return JSON.stringify(j.input||j).slice(0,1400);
+                   }catch(e){ return monidCorsNote(e); } } },
+  monid_run:   { name:"Monid run", argsHint:'{"provider":"apify","endpoint":"/...","body":{"query":"..."}}', badge:"CORS-blocked", desc:"Execute a Monid endpoint (run monid_inspect first for the schema - never guess). Polls up to 60s. Spends the Monid balance; the result reports its cost. Same browser-origin limit as Monid discover.",
+                 run: async a=>{ try{
+                   const req={provider:String(a.provider||"").slice(0,80),endpoint:String(a.endpoint||"").slice(0,200)};
+                   const input={};
+                   if(a.body) input.body=a.body; if(a.queryParams) input.queryParams=a.queryParams; if(a.pathParams) input.pathParams=a.pathParams;
+                   if(Object.keys(input).length) req.input=input;
+                   const fired=await monidApi("POST","/v1/run",req);
+                   const id=fired.runId||fired.run_id||(fired.run&&fired.run.id)||fired.id;
+                   if(!id) return JSON.stringify(fired).slice(0,1200);
+                   for(let i=0;i<20;i++){
+                     await new Promise(r=>setTimeout(r,3000));
+                     const j=await monidApi("GET","/v1/runs/"+encodeURIComponent(id));
+                     const st=String(j.status||(j.run&&j.run.status)||"").toUpperCase();
+                     if(["COMPLETED","FAILED","BLOCKED","STOPPED","TIMED_OUT"].includes(st)){
+                       const cv=(j.cost&&j.cost.value)!==undefined?j.cost.value:(j.run&&j.run.cost&&j.run.cost.value);
+                       const out=j.result??j.output??(j.run&&(j.run.result??j.run.output))??j;
+                       return "status:"+st+(cv!==undefined?" cost:"+cv:"")+"\n"+JSON.stringify(out).slice(0,1800);
+                     }
+                   }
+                   return "still running after ~60s - Monid run id "+id;
+                   }catch(e){ return monidCorsNote(e); } } },
+  vm_read:     { name:"VM read", argsHint:'{"path":"vm://memory/preferences"}', badge:"real", desc:"Browse Muse's own context filesystem: list directories (L1) or read one full memory entry (L2). Try vm:// for the root.",
+                 run: async a=> vmRead(a.path) },
+  vm_search:   { name:"VM search", argsHint:'{"query":"breakfast"}', badge:"real", desc:"Debuggable memory retrieval: every hit shows its vm:// path and relevance score (similarity x recency x usage).",
+                 run: async a=>{ const q=String(a.query||""); const r=retrieveMemory(q, 6);
+                   const qt=memTokens(q); const now=Date.now();
+                   const rows=r.hits.map(m=>{ const sim=memSim(qt,m); const age=(now-new Date(m.ts).getTime())/86400000;
+                     const score=(sim*(1/(1+age/30))*(1+Math.min(3,m.uses||0)*0.15)).toFixed(3);
+                     return `${score}  ${vmPath(m)}  ${m.text}`; });
+                   if(r.related.length) rows.push("linked: "+r.related.map(m=>vmPath(m)).join(", "));
+                   return rows.join("\n") || "(no matches)"; } },
+  remember:    { name:"Remember", argsHint:'{"fact":"..."}', badge:"real", desc:"Store a durable fact about the user - duplicates and evolved facts update in place instead of piling up.",
+                 run: async a=>{ const t=String(a.fact||"").trim(); if(t.length<8) throw new Error("too short");
+                   await rememberFact(t, "tool"); return "remembered"; } },
+  add_task:    { name:"Add task", argsHint:'{"text":"..."}', badge:"real", desc:"Track a task to completion.",
+                 run: async a=>{ const t=String(a.text||"").trim().slice(0,280); if(t.length<2) throw new Error("too short");
+                   S().tasks.unshift({id:uid("task"),text:t,status:"open",created:nowISO()}); await audit("task",`Task added: "${t}"`); await Store.save(); renderTasks(); return "task added"; } },
+  complete_task:{ name:"Complete task", argsHint:'{"id":"task-..."}', badge:"real", desc:"Mark a task done.",
+                 run: async a=>{ const t=S().tasks.find(x=>x.id===a.id); if(!t) throw new Error("no such task");
+                   t.status="done"; t.doneAt=nowISO(); await audit("task",`Task done: "${t.text}"`); await Store.save(); renderTasks(); return "done: "+t.text; } },
+  list_tasks:  { name:"List tasks", argsHint:"{}", badge:"real", desc:"Open and done tasks.",
+                 run: async()=>{ const o=S().tasks.filter(t=>t.status==="open"); return (o.length? o.map(t=>"- ["+t.id+"] "+t.text).join("\n") : "no open tasks"); } },
+  set_reminder:{ name:"Set reminder", argsHint:'{"text":"...","at":"ISO-8601 time"}', badge:"real", desc:"Fires while the tab is open; if Muse is asleep, it catches up on wake and says so.",
+                 run: async a=>{ const t=String(a.text||"").trim().slice(0,280); const at=new Date(a.at);
+                   if(!t || isNaN(at)) throw new Error("need text and a valid ISO time");
+                   if(window.Notification && Notification.permission==="default"){ try{ Notification.requestPermission(); }catch(e){} }
+                   S().reminders.unshift({id:uid("rem"),text:t,at:at.toISOString(),status:"pending",created:nowISO()});
+                   await audit("reminder",`Reminder set: "${t}" at ${at.toLocaleString()}`); await Store.save(); renderRems();
+                   return "reminder set for "+at.toLocaleString()+" (fires in-tab; late catch-up if asleep)"; } },
+  fetch_page:  { name:"Fetch page", argsHint:'{"url":"https://..."}', badge:"key/open-net", desc:"Reads a page as clean text. Uses TinyFish Fetch when its key is set (renders the page for you); otherwise a direct fetch in open-network mode (many sites block those - reported, not hidden).",
+                 run: async a=>{ const u=String(a.url||"").slice(0,300); if(!/^https?:\/\//.test(u)) throw new Error("http(s) URLs only");
+                   if(S().settings.searchProvider==="tinyfish" && S().settings.searchKey){
+                     const r=await fetch("https://api.fetch.tinyfish.ai",{method:"POST",headers:{"X-API-Key":S().settings.searchKey,"Content-Type":"application/json"},body:JSON.stringify({urls:[u],format:"markdown"})});
+                     if(!r.ok) throw new Error("tinyfish "+r.status);
+                     const j=await r.json();
+                     const txt=(j.results||[]).map(x=>x.text||"").join("\n");
+                     if(!txt) throw new Error("no content extracted");
+                     return txt.slice(0,3000);
+                   }
+                   if(!S().settings.openNetwork) throw new Error("needs a TinyFish key (Tools) or open network mode");
+                   const r=await fetch(u); if(!r.ok) throw new Error("http "+r.status);
+                   const t=await r.text();
+                   return t.replace(/<script[\s\S]*?<\/script>/g,"").replace(/<style[\s\S]*?<\/style>/g,"").replace(/<[^>]+>/g," ").replace(/\s+/g," ").slice(0,3000); } },
+};
+
+async function execTool(id, args){
+  setRT({tool:(Tools[id]?Tools[id].name:id).replace(/_/g," ")});
+  try{ return await execToolInner(id, args); }
+  finally{ setRT({tool:""}); }
+}
+async function execToolInner(id, args){
+  if(id==="mcp_call"){
+    if(!S().settings.openNetwork) return "blocked: MCP needs open network mode (Tools view)";
+    const srv = S().mcps.find(x=>x.name===args.server);
+    if(!srv) return "unknown MCP server";
+    try{ const r = await mcpRpc(srv,"tools/call",{name:args.tool, arguments:args.arguments||{}});
+      return JSON.stringify((r.result&&r.result.content)||r.result||r).slice(0,1500);
+    }catch(e){ return "mcp error: "+String(e).slice(0,150); }
+  }
+  const cust = S().customTools.find(t=>t.name===id && t.status==="active");
+  if(cust){
+    try{ return await runSandboxed(cust.code, "const args = "+JSON.stringify(args||{}).slice(0,4000)+";\n"); }
+    catch(e){ return "tool error: "+String(e).slice(0,150); }
+  }
+  const t = Tools[id];
+  if(!t) return "unknown tool: "+id;
+  try{ return String(await t.run(args||{})); }
+  catch(e){ return "Error: "+String(e.message||e).slice(0,200); }
+}
+
+function parseToolCalls(text){
+  const out=[]; const re=/```tool\s*(\{[\s\S]*?)```/g; let m;
+  while((m=re.exec(text)) && out.length<4){
+    try{ const j=JSON.parse(m[1]); if(j && typeof j.tool==="string") out.push({tool:j.tool.slice(0,60), args:j.args||{}}); }catch(e){}
+  }
+  return out;
+}
+async function toolCard(tool, res){
+  const c=document.createElement("div"); c.className="toolcard";
+  c.innerHTML=`<b>⚙ ${esc(tool)}</b><div class="res">${esc(res.slice(0,600))}</div>`;
+  $("#chatlog").appendChild(c); $("#chatlog").scrollTop=1e9;
+  S().chat.push({role:"sys", kind:"tool", text:`${tool}|||${res.slice(0,600)}`, ts:nowISO()});
+  await Store.save();
+}
+
+/* ---------------- tasks ---------------- */
+async function addTask(text){
+  const t=String(text||"").trim().slice(0,280); if(t.length<2) return;
+  S().tasks.unshift({id:uid("task"),text:t,status:"open",created:nowISO()});
+  await audit("task",`Task added: "${t}"`); await Store.save(); renderTasks();
+}
+function renderTasks(){
+  const box=$("#tasklist"); if(!box||!S()) return;
+  const open=S().tasks.filter(t=>t.status==="open"), done=S().tasks.filter(t=>t.status==="done").slice(0,5);
+  if(!S().tasks.length){ box.innerHTML=`<div class="small" style="color:var(--dim2);font-size:12px">No tasks. Quick to-dos live here, tracked to done.</div>`; return; }
+  box.innerHTML = [...open, ...done].map(t=>`<div class="task ${t.status}">
+      <button class="btn" data-tasktoggle="${t.id}" style="padding:3px 9px">${t.status==="open"?"○":"●"}</button>
+      <span class="txt">${esc(t.text)}</span>
+      <button class="btn badb" data-taskdel="${t.id}" style="padding:3px 9px">×</button>
+    </div>`).join("");
+  $$("#tasklist [data-tasktoggle]").forEach(b=>b.onclick=async()=>{ const t=S().tasks.find(x=>x.id===b.dataset.tasktoggle); if(!t)return;
+    if(t.status==="open"){ t.status="done"; t.doneAt=nowISO(); await audit("task",`Task done: "${t.text}"`); } else { t.status="open"; delete t.doneAt; }
+    await Store.save(); renderTasks(); });
+  $$("#tasklist [data-taskdel]").forEach(b=>b.onclick=async()=>{ const i=S().tasks.findIndex(x=>x.id===b.dataset.taskdel); if(i>=0){ S().tasks.splice(i,1); await Store.save(); renderTasks(); } });
+}
+
+/* ---------------- reminders (orb wake engine) ---------------- */
+async function checkReminders(){
+  if(!S()) return;
+  const now=Date.now(); let fired=false;
+  for(const r of S().reminders.filter(x=>x.status==="pending" && new Date(x.at).getTime()<=now)){
+    r.status="fired"; r.firedAt=nowISO(); r.late = now-new Date(r.at).getTime()>60000; fired=true;
+    await addMsg("sys", `⏰ Reminder: ${r.text}${r.late?" (fired late - Muse was asleep when it came due)":""}`);
+    if(window.Notification && Notification.permission==="granted"){ try{ new Notification("Muse reminder",{body:r.text}); }catch(e){} }
+    await audit("reminder",`Fired: "${r.text}"${r.late?" (late catch-up)":""}`);
+  }
+  if(fired){ await Store.save(); renderRems(); renderChat(); toast("Reminder fired."); }
+}
+function renderRems(){
+  const box=$("#remlist"); if(!box||!S()) return;
+  const pending=S().reminders.filter(r=>r.status==="pending").slice(0,6);
+  if(!pending.length){ box.innerHTML=""; return; }
+  box.innerHTML = pending.map(r=>`<div class="rem"><span>⏰</span><span class="txt">${esc(r.text)}</span><span>${fmtD(r.at)}</span>
+    <button class="btn badb" data-remdel="${r.id}" style="padding:3px 9px">×</button></div>`).join("");
+  $$("#remlist [data-remdel]").forEach(b=>b.onclick=async()=>{ const i=S().reminders.findIndex(x=>x.id===b.dataset.remdel); if(i>=0){ S().reminders.splice(i,1); await Store.save(); renderRems(); } });
+}
+
+/* ---------------- skills ---------------- */
+const BUILTIN_SKILLS = [
+  { id:"sk-email", name:"Email drafter", text:"When drafting email: subject line plus body, short plain paragraphs, no filler, sign off as the user. Never claim it was sent." },
+  { id:"sk-plan", name:"Planning", text:"Break plans into concrete, dated, doable steps. Smallest useful step first. Say what is next in one line." },
+  { id:"sk-code", name:"Coding standards", text:"Small self-contained diffs, no new dependencies, no secrets, state the risks and what to test." },
+];
+const activeSkills = ()=> [
+  ...BUILTIN_SKILLS.filter(s=>!(S().settings.skillsOff||[]).includes(s.id)),
+  ...S().userSkills
+];
+function renderSkills(){
+  const box=$("#skilllist"); if(!box||!S()) return;
+  const off=S().settings.skillsOff||[];
+  box.innerHTML = [
+    ...BUILTIN_SKILLS.map(s=>({...s, builtin:true, on:!off.includes(s.id)})),
+    ...S().userSkills.map(s=>({...s, builtin:false, on:true}))
+  ].map(s=>`<div class="skill">
+      <button class="btn ${s.on?"okb":""}" data-skiltoggle="${s.id}" style="padding:3px 10px">${s.on?"on":"off"}</button>
+      <span class="txt"><b>${esc(s.name)}${s.builtin?" <span style='color:var(--dim2)'>(built-in)</span>":""}</b><span>${esc(s.text.slice(0,110))}</span></span>
+      ${s.builtin?"":`<button class="btn badb" data-skildel="${s.id}" style="padding:3px 9px">×</button>`}
+    </div>`).join("");
+  $$("#skilllist [data-skiltoggle]").forEach(b=>b.onclick=async()=>{
+    const id=b.dataset.skiltoggle; const offL=S().settings.skillsOff=S().settings.skillsOff||[];
+    const i=offL.indexOf(id);
+    if(BUILTIN_SKILLS.some(s=>s.id===id)){ i>=0? offL.splice(i,1) : offL.push(id); await Store.save(); renderSkills(); }
+  });
+  $$("#skilllist [data-skildel]").forEach(b=>b.onclick=async()=>{ const i=S().userSkills.findIndex(x=>x.id===b.dataset.skildel); if(i>=0){ S().userSkills.splice(i,1); await Store.save(); renderSkills(); } });
+}
+
+/* ---------------- open network + MCP ---------------- */
+const CSP_META = ()=> document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+function applyNetPolicy(){
+  // The shipped CSP already permits tool fetches (connect-src https:); keys are only ever
+  // attached to the configured model provider by our own code, and sandboxed frames/workers
+  // get connect-src 'none'. This toggle is the consent gate for MCP + arbitrary fetch_page.
+  const on = !!(S() && S().settings.openNetwork);
+  const st=$("#opennetstate"); if(st){ st.textContent = on?"ON - MCP and page fetch enabled":"off"; st.className = "pill "+(on?"warn":""); }
+  const cb=$("#opennet"); if(cb) cb.checked = on;
+}
+async function mcpRpc(srv, method, params){
+  const r = await fetch(srv.url, { method:"POST",
+    headers: Object.assign({"Content-Type":"application/json","Accept":"application/json, text/event-stream"}, srv.key?{Authorization:"Bearer "+srv.key}:{}) ,
+    body: JSON.stringify({jsonrpc:"2.0", id:uid("m"), method, params}) });
+  if(!r.ok) throw new Error("http "+r.status);
+  const ct = r.headers.get("content-type")||"";
+  if(ct.includes("text/event-stream")){
+    const t = await r.text();
+    const line = t.split("\n").find(l=>l.startsWith("data:"));
+    if(!line) throw new Error("empty event stream");
+    return JSON.parse(line.slice(5));
+  }
+  return r.json();
+}
+async function mcpDiscover(id){
+  const srv=S().mcps.find(x=>x.id===id); if(!srv) return;
+  try{ await mcpRpc(srv,"initialize",{protocolVersion:"2025-03-26",capabilities:{},clientInfo:{name:"open-muse",version:"1.0"}}); }catch(e){}
+  const res = await mcpRpc(srv,"tools/list",{});
+  srv.tools = ((res.result&&res.result.tools)||[]).map(t=>({name:String(t.name).slice(0,60), desc:String(t.description||"").slice(0,140)})).slice(0,20);
+  await audit("mcp",`Discovered ${srv.tools.length} tools on "${srv.name}"`);
+  await Store.save(); renderMcps(); renderTools();
+}
+function renderMcps(){
+  const box=$("#mcplist"); if(!box||!S()) return;
+  if(!S().mcps.length){ box.innerHTML=`<div class="small" style="color:var(--dim2);font-size:12px">No servers yet.</div>`; return; }
+  box.innerHTML = S().mcps.map(s=>`<div class="mcp">
+      <span class="txt"><b>${esc(s.name)}</b><span>${esc(s.url)}${s.tools?` - ${s.tools.length} tools: ${s.tools.map(t=>esc(t.name)).join(", ").slice(0,90)}`:" - not discovered yet"}</span></span>
+      <button class="btn" data-mcpdisc="${s.id}">Discover tools</button>
+      <button class="btn badb" data-mcpdel="${s.id}" style="padding:3px 9px">×</button>
+    </div>`).join("");
+  $$("#mcplist [data-mcpdisc]").forEach(b=>b.onclick=async()=>{ b.disabled=true; try{ await mcpDiscover(b.dataset.mcpdisc); toast("Tools discovered."); }catch(e){ toast("MCP failed: "+String(e).slice(0,70)); } b.disabled=false; });
+  $$("#mcplist [data-mcpdel]").forEach(b=>b.onclick=async()=>{ const i=S().mcps.findIndex(x=>x.id===b.dataset.mcpdel); if(i>=0){ S().mcps.splice(i,1); await Store.save(); renderMcps(); } });
+}
+
+/* ---------------- tools view ---------------- */
+function renderTools(){
+  const box=$("#toolgrid"); if(!box||!S()) return;
+  const customs = S().customTools.filter(t=>t.status==="active");
+  const pending = S().customTools.filter(t=>t.status==="pending");
+  box.innerHTML = [
+    ...Object.entries(Tools).map(([id,t])=>({id, name:t.name, desc:t.desc, badge:t.badge, hint:t.argsHint})),
+    ...customs.map(t=>({id:t.id, name:t.name, desc:t.desc+" (built by Muse)", badge:"custom", hint:t.argsHint})),
+    ...pending.map(t=>({id:t.id, name:t.name+" - awaiting your approval", desc:t.desc, badge:"pending", hint:t.argsHint, pend:true}))
+  ].map(t=>`<div class="tool"><h4>${esc(t.name)} <span class="pill ${t.badge==="real"?"ok":(t.badge==="pending"||/blocked/i.test(t.badge))?"warn":""}">${t.badge}</span></h4>
+    <div class="small">${esc(t.desc)}</div>
+    ${t.pend?`<div class="row"><button class="btn okb" data-ctapp="${t.id}">Approve</button><button class="btn badb" data-ctrej="${t.id}">Reject</button></div>`
+      :(t.badge==="custom"?`<div class="row"><button class="btn badb" data-ctdel="${t.id}">Remove</button></div>`:"")}
+  </div>`).join("");
+  $$("#toolgrid [data-ctapp]").forEach(b=>b.onclick=()=>decideCustomTool(b.dataset.ctapp,true));
+  $$("#toolgrid [data-ctrej]").forEach(b=>b.onclick=()=>decideCustomTool(b.dataset.ctrej,false));
+  $$("#toolgrid [data-ctdel]").forEach(b=>b.onclick=async()=>{ const i=S().customTools.findIndex(x=>x.id===b.dataset.ctdel); if(i>=0){ await audit("tool",`Custom tool removed: "${S().customTools[i].name}"`); S().customTools.splice(i,1); await Store.save(); renderTools(); } });
+  const ss=$("#searchstate"); if(ss) ss.textContent = S().settings.searchKey ? "Search key saved ("+(S().settings.searchProvider||"tavily")+")." : "No search key yet.";
+  const ms=$("#monidstate"); if(ms) ms.textContent = (S().settings.monidKey ? "Monid key stored. " : "No Monid key yet - create one at app.monid.ai/access/api-keys. ") + "Heads up: Monid's API only allows browser calls from its own site, so from this static app the calls are CORS-blocked for now; the Monid CLI works anywhere.";
+  const spv=$("#searchpv"); if(spv) spv.value = S().settings.searchProvider || "tinyfish";
+}
+
+/* ---------------- self-built tools (Muse extends itself) ---------------- */
+async function buildCustomTool(ask){
+  if(!getKey()){ toast("Add a model key in Settings first."); return; }
+  const engine = S().settings.provider==="tokenharbor" ? EVOLVE_ENGINE : activeModel();
+  const raw = await chatOnce([
+    {role:"system",content:`Design a small browser tool as strict JSON: {"name":"snake_case_id","desc":"one line","argsHint":"{\\"x\\":\\"...\\"}","code":"async JS body; 'args' is in scope; use console.log for output; return the result","sampleArgs":{"x":"..."}}.
+Rules: the code runs in an isolated worker - no DOM, no storage, no fetch to anything (pure computation, parsing, transformation). Under 80 lines. No secrets. Example: word_counter, csv_to_json, cron_explainer, unit_converter.`},
+    {role:"user",content: ask.slice(0,600)}
+  ], true, engine);
+  const p = JSON.parse(raw);
+  const t = { id:uid("ct"), name:String(p.name||"").toLowerCase().replace(/[^a-z0-9_]/g,"").slice(0,40),
+    desc:String(p.desc||"").slice(0,200), argsHint:String(p.argsHint||"{}").slice(0,120),
+    code:String(p.code||"").slice(0,6000), sampleArgs:(p.sampleArgs&&typeof p.sampleArgs==="object")?p.sampleArgs:{},
+    status:"pending", created:nowISO(), from:ask.slice(0,140) };
+  // gates: shape, uniqueness, secret scan, sandbox test
+  const gates=[];
+  gates.push({name:"valid unique name", pass: !!t.name && !Tools[t.name] && !S().customTools.some(x=>x.name===t.name)});
+  gates.push({name:"code size <= 6000 chars", pass: t.code.length>0 && t.code.length<=6000});
+  const hits = EVO_SECRET_RES.filter(re=>re.test(t.code));
+  gates.push({name:"secret scan", pass: hits.length===0});
+  const test = await runSandboxed(t.code, "const args = "+JSON.stringify(t.sampleArgs).slice(0,2000)+";\n");
+  gates.push({name:"sandbox test-run completes", pass: !/^Error:|^sandbox unavailable/.test(test), note: test.slice(0,140)});
+  const pass = gates.every(g=>g.pass);
+  t.eval = {at:nowISO(), gates, pass, testOut:test.slice(0,300)};
+  if(pass){
+    S().customTools.unshift(t);
+    await audit("tool",`Muse built tool "${t.name}" - passed gates, awaiting your approval`);
+    toast(`Tool "${t.name}" built and tested - approve it in Tools.`);
+  } else {
+    S().customTools.unshift({...t, status:"rejected"});
+    await audit("tool",`Muse-built tool "${t.name||"unnamed"}" FAILED gates: ${gates.filter(g=>!g.pass).map(g=>g.name).join("; ").slice(0,120)}`);
+    toast("Tool failed gates - see audit log.");
+  }
+  await Store.save(); renderTools();
+}
+async function decideCustomTool(id, ok){
+  const t=S().customTools.find(x=>x.id===id); if(!t) return;
+  if(ok && !(t.eval&&t.eval.pass)){ toast("Gates must pass first."); return; }
+  t.status = ok ? "active" : "rejected";
+  await audit("tool",`${ok?"Approved":"Rejected"} custom tool: "${t.name}"`);
+  await Store.save(); renderTools();
+}
+
+/* ---------------- studio: user mini-apps in a real sandbox ---------------- */
+async function genMiniApp(desc){
+  const raw = await chatOnce([
+    {role:"system",content:`You build tiny self-contained web apps. Output exactly one fenced \`\`\`html block: a complete single-file HTML app with inline <style> and <script>. Dark refined theme. Fully self-contained - no external URLs, no fetch calls, no images from the web. After the block add one line: NAME: <short app name>.`},
+    {role:"user",content: desc.slice(0,800)}
+  ], false, S().settings.provider==="tokenharbor" ? EVOLVE_ENGINE : activeModel());
+  const m = raw.match(/```html([\s\S]*?)```/);
+  if(!m) throw new Error("model returned no app");
+  const code = m[1].trim();
+  if(code.length > 80000) throw new Error("app too large");
+  const hits = EVO_SECRET_RES.filter(re=>re.test(code));
+  if(hits.length) throw new Error("generated app failed the secret scan");
+  if(/https?:\/\//.test(code)) throw new Error("generated app references external URLs - rejected (must be self-contained)");
+  const name = ((raw.match(/NAME:\s*(.+)/)||[])[1] || desc).trim().slice(0,60);
+  S().miniapps.unshift({id:uid("app"), name, code, created:nowISO(), from:desc.slice(0,140)});
+  if(S().miniapps.length>20) S().miniapps.length=20;
+  await audit("studio",`Mini-app built: "${name}"`);
+  await Store.save(); renderStudio();
+  return name;
+}
+function runMiniApp(id){
+  const app=S().miniapps.find(x=>x.id===id); if(!app) return;
+  openModal(`<h3>${esc(app.name)}</h3>
+    <div class="sub" id="studionote">Running in a sandboxed frame - an isolated origin with no storage and no network (its own CSP says connect-src 'none'). It cannot see your Muse data.</div>
+    <div class="row">
+      <button class="btn" id="dlapp">Download .html</button>
+      <button class="btn modal-cancel">Close</button>
+    </div>
+    <div id="framehost" style="margin-top:10px"></div>`);
+  $("#dlapp").onclick=()=>{ const b=new Blob([app.code],{type:"text/html"}); const x=document.createElement("a"); x.href=URL.createObjectURL(b); x.download=app.name.replace(/[^\w-]+/g,"-")+".html"; x.click(); };
+  const mount=()=>{
+    const f=document.createElement("iframe");
+    f.className="studioframe"; f.setAttribute("sandbox","allow-scripts");
+    f.src="studio-frame.html";
+    f.onload=()=>{ f.contentWindow.postMessage({openmuseApp:app.code}, "*"); };
+    $("#framehost").appendChild(f);
+  };
+  mount();
+}
+function renderStudio(){
+  const cnt=$("#appcount"); if(cnt) cnt.textContent = S()?S().miniapps.length:0;
+  const box=$("#applist"); if(!box||!S()) return;
+  if(!S().miniapps.length){ box.innerHTML=`<div class="empty">No apps yet. Describe one - "build me a pomodoro timer" - and Muse writes it, gates it, and keeps it here.</div>`; return; }
+  box.innerHTML = S().miniapps.map(x=>`<div class="app">
+      <span class="txt"><b>${esc(x.name)}</b><span>${fmtD(x.created)}${x.from?` - from "${esc(x.from)}"`:""}</span></span>
+      <button class="btn pri" data-apprun="${x.id}">Run</button>
+      <button class="btn badb" data-appdel="${x.id}">Delete</button>
+    </div>`).join("");
+  $$("#applist [data-apprun]").forEach(b=>b.onclick=()=>runMiniApp(b.dataset.apprun));
+  $$("#applist [data-appdel]").forEach(b=>b.onclick=async()=>{ const i=S().miniapps.findIndex(x=>x.id===b.dataset.appdel); if(i>=0){ S().miniapps.splice(i,1); await Store.save(); renderStudio(); } });
+}
+
+
+/* ---------------- design engine: themes, density, compat ---------------- */
+function applyAppearance(){
+  const s = S() ? S().settings : {theme:"serious", density:"comfortable", font:"m"};
+  const de = document.documentElement;
+  de.dataset.theme = s.theme || "serious";
+  de.dataset.density = s.density || "comfortable";
+  de.dataset.font = s.font || "m";
+  $$("#themerow .swatch").forEach(b=>b.classList.toggle("on", b.dataset.themePick===de.dataset.theme));
+  const d=$("#setdensity"); if(d) d.value = de.dataset.density;
+  const f=$("#setfont"); if(f) f.value = de.dataset.font;
+}
+const Compat = {
+  check(){
+    return [
+      { name:"WebCrypto (encrypted VM)", ok: !!(crypto && crypto.subtle), fix:"lock/E2EE unavailable without it" },
+      { name:"Local storage", ok: (()=>{ try{ localStorage.setItem("t","1"); localStorage.removeItem("t"); return true; }catch(e){ return false; } })(), fix:"nothing persists without it" },
+      { name:"Web Workers (JS sandbox)", ok: typeof Worker !== "undefined", fix:"run_js and custom tools disabled" },
+      { name:"Notifications", ok: "Notification" in window, fix:"reminders show in-chat only" },
+      { name:"Clipboard", ok: !!(navigator && navigator.clipboard), fix:"hand-off shows text to copy manually" },
+    ];
+  },
+  render(){
+    const box=$("#compatlist"); if(!box) return;
+    box.innerHTML = this.check().map(c=>`<div class="rowc"><span class="pill ${c.ok?"ok":"bad"}"><span class="d"></span>${c.ok?"yes":"no"}</span><span>${c.name}${c.ok?"":` <span style="color:var(--dim2)">- ${c.fix}</span>`}</span></div>`).join("");
+  },
+  has(name){ return this.check().find(c=>c.name.startsWith(name))?.ok !== false; }
+};
+$$("#themerow .swatch").forEach(b=>b.addEventListener("click", async()=>{
+  S().settings.theme = b.dataset.themePick; applyAppearance(); await Store.save();
+}));
+$("#setdensity").addEventListener("change", async()=>{ S().settings.density=$("#setdensity").value; applyAppearance(); await Store.save(); });
+$("#setfont").addEventListener("change", async()=>{ S().settings.font=$("#setfont").value; applyAppearance(); await Store.save(); });
+
+/* ---------------- boot ---------------- */
+/* ---------------- multi-agent: teams and swarms ----------------
+   The orchestrator asks the model to split a goal into role-shaped subtasks
+   (researcher / coder / reviewer / writer), runs them in parallel with a
+   live roster in the status rail, then a merge pass combines the work.
+   Swarm mode: three fixed angles on the same goal, then merge.
+   Honest bounds: these are parallel model calls inside this tab - no
+   background agents, nothing runs while the tab is closed, and agents only
+   produce artifacts (researchers may use read-only tools). Anything
+   sensitive still has to come back through sentinel approval. */
+const AgentRoles = {
+  researcher: "You are the RESEARCHER on a small agent team. Gather and verify facts; you may emit fenced ```tool blocks for web_search, fetch_page or calc. Output: tight, sourced findings.",
+  coder: "You are the CODER on a small agent team. Produce working code and technical artifacts. Output: code blocks plus exact implementation notes.",
+  reviewer: "You are the REVIEWER on a small agent team. Attack the problem: find errors, risks, missing pieces. Output: prioritized critique with concrete fixes.",
+  writer: "You are the WRITER on a small agent team. Turn material into finished prose: simple, direct, warm. Output: the final text itself."
+};
+const TEAM = {active:false, mode:"", goal:"", agents:[]};
+async function runTeam(goalId, mode){
+  const s=S(); const g=s.goals.find(x=>x.id===goalId); if(!g) return;
+  if(TEAM.active){ toast("A team is already running - watch the status rail."); return; }
+  const ai = AI.provider();
+  TEAM.active=true; TEAM.mode=mode; TEAM.goal=g.title; TEAM.agents=[];
+  setRT({state:"working", step:(mode==="swarm"?"Swarm: ":"Team: ")+g.title, tool:""});
+  try{
+    let specs;
+    if(mode==="swarm"){
+      specs=[{role:"researcher",task:"Find the strongest facts, sources and examples for: "+g.title},
+             {role:"coder",task:"Design the concrete plan or artifact for: "+g.title},
+             {role:"reviewer",task:"Red-team likely approaches to: "+g.title}];
+    } else {
+      const decomp = await ai.generateText({messages:[
+        {role:"system",content:"You decompose goals for a small agent team. Reply with strict JSON only: {\"agents\":[{\"role\":\"researcher|coder|reviewer|writer\",\"task\":\"<one concrete self-contained subtask>\"}]} - 2 to 4 agents, no dependencies between tasks."},
+        {role:"user",content:g.title}
+      ], json:true});
+      try{ specs=(JSON.parse(decomp).agents||[]).slice(0,4); if(!specs.length) throw 0; }
+      catch(e){ specs=[{role:"researcher",task:"Research: "+g.title},{role:"writer",task:"Draft the deliverable for: "+g.title}]; }
+    }
+    TEAM.agents = specs.map(sp=>({role:AgentRoles[sp.role]?sp.role:"researcher", task:String(sp.task||"").slice(0,300)||("Work on: "+g.title), status:"queued", output:""}));
+    renderStatus();
+    await audit("team", `${mode==="swarm"?"Swarm":"Team"} started on "${g.title}": `+TEAM.agents.map(x=>x.role).join(", "));
+    await addMsg("sys", `${mode==="swarm"?"Swarm":"Team"} running on \u201c${g.title}\u201d - ${TEAM.agents.length} agents in parallel (${TEAM.agents.map(x=>x.role).join(", ")}). Live roster is in the status rail; artifacts only, nothing external happens without your approval.`);
+    renderChat();
+    await Promise.all(TEAM.agents.map(async ag=>{
+      ag.status="running"; renderStatus();
+      try{
+        let out = await ai.generateText({messages:[
+          {role:"system",content:AgentRoles[ag.role]},
+          {role:"user",content:ag.task}
+        ]});
+        if(ag.role==="researcher"){
+          const calls=parseToolCalls(out);
+          if(calls.length){
+            const results=[];
+            for(const c of calls.slice(0,3)){ results.push({tool:c.tool, result:await execTool(c.tool, c.args||{})}); }
+            out = await ai.generateText({messages:[
+              {role:"system",content:AgentRoles[ag.role]},
+              {role:"user",content:ag.task+"\n\nTool results:\n"+results.map(r=>`[${r.tool}]\n${r.result}`).join("\n\n")+"\n\nWrite the final findings from this material."}
+            ]});
+          }
+        }
+        ag.output=out; ag.status="done";
+      }catch(e){ ag.status="failed"; ag.output=String(e.message||e).slice(0,200); }
+      renderStatus();
+    }));
+    const ok = TEAM.agents.filter(x=>x.status==="done");
+    let merged;
+    if(!ok.length){ merged="Every agent failed - check the model key in Settings and try again."; }
+    else{
+      merged = await ai.generateText({messages:[
+        {role:"system",content:"You are the orchestrator. Merge your agent team's work into one coherent deliverable: keep what survives scrutiny, drop what does not. End with one line naming what you merged."},
+        {role:"user",content:`Goal: ${g.title}\n\n`+ok.map(x=>`[${x.role} - ${x.task}]\n${x.output}`).join("\n\n---\n\n")}
+      ]});
+    }
+    await addMsg("muse", `Team merge on \u201c${g.title}\u201d (${ok.length}/${TEAM.agents.length} agents delivered):\n\n${merged}`);
+    await audit("team", `Team finished on "${g.title}" (${ok.length}/${TEAM.agents.length} ok)`);
+    s.counters.actions++;
+    setRT({last:"Team finished: "+g.title.slice(0,50)});
+  }catch(e){
+    await addMsg("sys", "Team run failed. " + friendlyModelError(e));
+    await audit("error", `Team run failed on "${g.title}": ${String(e.message||e).slice(0,120)}`);
+  }
+  TEAM.active=false; TEAM.agents=[];
+  setRT({state:"idle", step:"", tool:""});
+  await Store.save(); renderAll();
+}
+
+/* lock screen shared by boot and idle auto-lock. Sticky: backdrop clicks do
+   not dismiss - locked means locked. */
+function showLockScreen(reason){
+  openModal(`<h3>Personal VM is locked</h3><div class="sub">${esc(reason||"This store is encrypted with your passphrase. Enter it to unlock.")}</div>
+    <div class="field"><input type="password" id="unlockpass" placeholder="passphrase"></div>
+    <div class="row"><button class="btn badb" id="wipeinstead">Erase and start fresh</button><button class="btn pri" id="unlockbtn">Unlock</button></div>`);
+  $("#modalwrap").dataset.sticky="1";
+  const tryUnlock = async ()=>{
+    const btn=$("#unlockbtn"); btn.disabled=true; btn.textContent="Unlocking...";
+    try{
+      const wasIdleLock = !S();
+      await Store.unlock($("#unlockpass").value);
+      delete $("#modalwrap").dataset.sticky;
+      closeModal();
+      if(wasIdleLock){ renderAll(); await audit("lock","Unlocked after idle auto-lock"); }
+      armIdleLock();
+      if(!window.__booted){ window.__booted=true; finishBoot(); }
+    }
+    catch(e){ toast("Wrong passphrase."); btn.disabled=false; btn.textContent="Unlock"; $("#unlockpass").select(); }
+  };
+  $("#unlockbtn").onclick=tryUnlock;
+  $("#unlockpass").addEventListener("keydown", e=>{ if(e.key==="Enter") tryUnlock(); });
+  setTimeout(()=>$("#unlockpass").focus(), 50);
+  $("#wipeinstead").onclick=()=>{ Store.wipe(); location.reload(); };
+}
+/* idle auto-lock: with a passphrase set, 15 idle minutes wipes the decrypted
+   state and derived key from memory. The at-rest store was always ciphertext;
+   after lock, plaintext exists nowhere. */
+const IDLE_LOCK_MS = 15*60*1000;
+let idleTimer=null;
+function armIdleLock(){
+  clearTimeout(idleTimer);
+  if(!(Store.locked && Store.passKey)) return;
+  idleTimer=setTimeout(sessionLock, IDLE_LOCK_MS);
+}
+function sessionLock(){
+  if(!(Store.locked && Store.passKey)) return;
+  Store.passKey=null; Store.raw=null;
+  clearTimeout(idleTimer);
+  showLockScreen("Locked after 15 idle minutes. Your data is ciphertext again - enter your passphrase to continue.");
+}
+["pointerdown","keydown","touchstart"].forEach(ev=>addEventListener(ev, armIdleLock, {passive:true}));
+
+(async function boot(){
+  await Store.load();
+  if(Store.locked){ showLockScreen(); }
+  else { window.__booted=true; finishBoot(); }
+})();
+async function finishBoot(){
+  armIdleLock();
+  {
+    const dead=S().memory.filter(m=>!memAlive(m));
+    if(dead.length){
+      S().memory=S().memory.filter(memAlive);
+      for(const m of dead) await audit("memory", `Forgot expired memory: "${m.text.slice(0,60)}"`);
+      await Store.save();
+    }
+  }
+  renderAll();
+  applyModeUI();
+  applyNetPolicy();
+  applyAppearance();
+  Compat.render();
+  if(S().settings.dockCollapsed){ document.body.classList.add("dock-collapsed"); $("#docktoggle").textContent = "\u2039"; }
+  $("#docktoggle").addEventListener("click", async()=>{
+    const c = document.body.classList.toggle("dock-collapsed");
+    $("#docktoggle").textContent = c ? "\u2039" : "\u203a";
+    S().settings.dockCollapsed = c; await Store.save();
+  });
+  const acb=$("#autonomycb"); if(acb){ acb.checked = S().settings.autonomy!==false;
+    acb.addEventListener("change", async()=>{ S().settings.autonomy=acb.checked; await audit("settings","Autonomy "+(acb.checked?"on":"off")); await Store.save();
+      if(acb.checked){ const g=S().goals.find(x=>x.status==="active"); if(g) autoAdvance(g.id); } }); }
+
+  // orb sleep/wake: how long was Muse asleep?
+  const gap = S().lastSeen ? Date.now()-new Date(S().lastSeen).getTime() : 0;
+  if(gap > 30*60*1000){
+    const hrs = Math.round(gap/360000)/10;
+    await addMsg("sys", `Muse was asleep for ~${hrs}h - its orb lives in this tab, so nothing ran while it was closed. Catching up now.`);
+  }
+  S().lastSeen = nowISO(); await Store.save();
+  setInterval(()=>{ if(S()){ S().lastSeen=nowISO(); Store.save(); } }, 60000);
+  await checkReminders();
+  setInterval(checkReminders, 20000);
+  distillSession();
+  $("#vmstate").innerHTML = Store.locked ? '<span class="d"></span>encrypted' : '<span class="d"></span>local';
+  const active = S().goals.find(g=>g.status==="active");
+  if(S().chat.length && active){
+    const done = active.plan.steps.filter(x=>x.status==="done").length;
+    const next = active.plan.steps.find(x=>x.status==="todo"||x.status==="approval");
+    await addMsg("muse", `Welcome back. "${active.title}" is ${done}/${active.plan.steps.length} done${next?` - next up is "${next.title}"`:""}. Say "advance" and I'll keep moving.`);
+    await Store.save();
+  }
+  if(!S().chat.length){
+    await addMsg("muse","Hi - I'm Muse. I run entirely in your browser: your goals, memory and plans live here, not on someone's server. Tell me what needs to get done, or give me a goal and I'll plan it and start working. First, drop a key in Settings so I can think - OpenRouter or Token Harbor both work, and Token Harbor has free models.");
+    await addMsg("sys","Open Muse is open source. The agent is real - it thinks with your own model key - but it acts only inside this browser. External actions come back to you as drafts and preparations; the final send is always yours.");
+    await Store.save(); renderChat();
+  }
+  setTimeout(proactiveNudge, 2500);
+  setInterval(proactiveNudge, 10*60*1000);
+  setTimeout(()=>{ const g=S() && S().goals.find(x=>x.status==="active"); if(g) autoAdvance(g.id); }, 6000);
+  setPresence("idle");
+}
