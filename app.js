@@ -21,7 +21,7 @@ const Store = {
     return {
       settings: { provider: "openrouter", model: "", hasKey: false, saveKey: false, keyStored: "", mode: "agent", searchProvider: "tavily", searchKey: "", openNetwork: false, skillsOff: [], autonomy: true, theme: "serious", density: "comfortable", font: "m", statusStrip: true },
       chat: [],          // {role, text, ts, kind}
-      goals: [],         // {id,title,created,plan:{steps:[]},status}
+      goals: [],         // {id,title,created,due,note,plan:{steps:[]},status}
       memory: [],        // {id,text,ts,source}
       audit: [],         // {ts,kind,text}
       connectors: [      // local permission model (scopes gate what Muse may plan)
@@ -283,40 +283,76 @@ function renderConnectors(){
     await Store.save(); renderConnectors();
   }));
 }
+function dueInfo(g){
+  if(!g.due) return null;
+  const end=new Date(g.due+"T23:59:59");
+  const days=Math.ceil((end-Date.now())/86400000);
+  return {days, label:days<0?`${Math.abs(days)}d overdue`:days===0?"due today":days===1?"due tomorrow":`${days}d left`};
+}
+function moveStep(gid,sid,delta){
+  const g=S().goals.find(x=>x.id===gid); if(!g) return;
+  const i=g.plan.steps.findIndex(x=>x.id===sid), j=i+delta;
+  if(i<0||j<0||j>=g.plan.steps.length) return;
+  [g.plan.steps[i],g.plan.steps[j]]=[g.plan.steps[j],g.plan.steps[i]];
+  audit("plan",`Reordered plan step on "${g.title}"`).then(()=>Store.save()).then(()=>renderGoals());
+}
+function downloadText(name,type,text){
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([text],{type})); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+function goalsMarkdown(){
+  return `# Open Muse goals\n\n`+S().goals.map(g=>{
+    const meta=[g.due?`Due: ${g.due}`:"",g.note?`Steering: ${g.note}`:""].filter(Boolean).join(" · ");
+    return `## ${g.title}\n${meta?`\n${meta}\n`:""}\n`+g.plan.steps.map(x=>`- [${x.status==="done"?"x":" "}] ${x.title} (${x.kind})${x.output?`\n  - Output: ${x.output.replace(/\n/g," ").slice(0,500)}`:""}`).join("\n");
+  }).join("\n\n");
+}
+function csvCell(v){ return `"${String(v??"").replace(/"/g,'""')}"`; }
+function goalsCSV(){
+  const rows=[["goal","goal_status","due","steering","step","step_status","kind","output"]];
+  S().goals.forEach(g=>g.plan.steps.forEach(x=>rows.push([g.title,g.status,g.due||"",g.note||"",x.title,x.status,x.kind,x.output||""])));
+  return rows.map(r=>r.map(csvCell).join(",")).join("\n");
+}
 function renderGoals(){
   const s=S(); if(!s) return;
+  const strip=$("#duestrip");
+  const due=s.goals.filter(g=>g.status!=="done"&&g.due).map(g=>({g,d:dueInfo(g)})).filter(x=>x.d&&x.d.days<=14).sort((a,b)=>a.d.days-b.d.days);
+  strip.hidden=!due.length;
+  strip.innerHTML=due.length?`<b>Due soon</b>${due.map(({g,d})=>`<span class="duechip ${d.days<0?"late":""}">${esc(g.title)} · ${d.label}</span>`).join("")}`:"";
   const grid=$("#goalgrid");
-  if(!s.goals.length){ grid.innerHTML=`<div class="empty" style="grid-column:1/-1">No goals yet. Tell Muse a goal in chat - "my goal is to..." - or use + New goal.</div>`; return; }
+  if(!s.goals.length){ grid.innerHTML=`<div class="empty" style="grid-column:1/-1">No goals yet. Tell Muse a goal - "my goal is to..." - or use + New goal.</div>`; return; }
   grid.innerHTML = s.goals.map(g => {
     const done=g.plan.steps.filter(x=>x.status==="done").length;
-    const pct=Math.round(100*done/g.plan.steps.length);
-    return `<div class="goal" data-goal="${g.id}">
+    const pct=g.plan.steps.length?Math.round(100*done/g.plan.steps.length):0;
+    const di=dueInfo(g);
+    return `<div class="goal ${g.status==="done"?"archived":""}" data-goal="${g.id}">
       <h3>${esc(g.title)}</h3>
+      <div class="goalmeta">${g.status==="done"?'<span class="pill ok">Archived complete</span>':""}${di?`<span class="pill ${di.days<0?"bad":di.days<=3?"warn":""}">${esc(di.label)} · ${esc(g.due)}</span>`:""}${g.note?`<span class="steernote" title="Injected into every planning and execution prompt">↳ ${esc(g.note)}</span>`:""}</div>
       <div class="progbar"><i style="width:${pct}%"></i></div>
       <div class="small" style="font-size:11.5px;color:var(--dim)">${done}/${g.plan.steps.length} steps · ${g.status}</div>
-      <div class="steps">${g.plan.steps.map(x=>{
+      <div class="steps">${g.plan.steps.map((x,i)=>{
         const ic = x.status==="done"?"✓":x.status==="approval"?"⏸":x.status==="doing"?"…":x.kind==="user"?"◌":"·";
-        return `<div class="step ${x.status}" ${x.status==="done"?`data-reopen="${g.id}|${x.id}" title="Click to reopen this step"`:""}><span class="ic">${ic}</span><span class="st-t">${esc(x.title)}</span><span class="tag">${x.kind}</span></div>`;
+        return `<div class="step ${x.status}" draggable="true" data-dragstep="${g.id}|${x.id}" ${x.status==="done"?`data-reopen="${g.id}|${x.id}" title="Click to reopen this step"`:""}><span class="drag" aria-hidden="true">⠿</span><span class="ic">${ic}</span><span class="st-t">${esc(x.title)}</span><span class="stepmoves"><button class="iconbtn" aria-label="Move step up" data-move="${g.id}|${x.id}|-1" ${i===0?"disabled":""}>↑</button><button class="iconbtn" aria-label="Move step down" data-move="${g.id}|${x.id}|1" ${i===g.plan.steps.length-1?"disabled":""}>↓</button></span><span class="tag">${x.kind}</span></div>`;
       }).join("")}</div>
       <div class="row">
         <button class="btn pri" data-advance="${g.id}" ${g.status==="done"?"disabled":""}>${g.status==="done"?"Complete":"Advance"}</button>
-        <button class="btn" data-team="${g.id}|team" title="Orchestrator splits this goal between researcher/coder/reviewer/writer agents running in parallel, then merges">Team</button>
-        <button class="btn" data-team="${g.id}|swarm" title="Three agents attack the same goal from different angles, then merge">Swarm</button>
-        <button class="btn" data-discuss="${g.id}">Discuss</button>
-        <button class="btn badb" data-delgoal="${g.id}">Drop</button>
+        <button class="btn" data-tune="${g.id}">Tune</button>
+        <button class="btn" data-team="${g.id}|team">Team</button><button class="btn" data-team="${g.id}|swarm">Swarm</button>
+        <button class="btn" data-discuss="${g.id}">Discuss</button><button class="btn badb" data-delgoal="${g.id}">Drop</button>
       </div></div>`;
   }).join("");
-  $$("[data-advance]").forEach(b=>b.addEventListener("click",()=>advanceGoal(b.dataset.advance)));
-  $$("[data-team]").forEach(b=>b.addEventListener("click",()=>{ const [gid,md]=b.dataset.team.split("|"); runTeam(gid, md==="swarm"?"swarm":"team"); }));
-  $$("[data-discuss]").forEach(b=>b.addEventListener("click",g=>{ switchView("chat"); const goal=S().goals.find(x=>x.id===g.target.dataset.discuss); if(goal){ $("#chatinput").value=`About my goal "${goal.title}": `; $("#chatinput").focus(); } }));
-  $$("[data-reopen]").forEach(b=>b.addEventListener("click", async ()=>{
-    const [gid,sid]=b.dataset.reopen.split("|");
-    const g=S().goals.find(x=>x.id===gid); const st=g&&g.plan.steps.find(x=>x.id===sid); if(!st) return;
-    st.status="todo"; st.output=""; g.status="active";
-    await audit("plan",`Reopened step: "${st.title}" (goal: "${g.title}")`);
-    await Store.save(); renderGoals(); renderStatus(); toast("Step reopened.");
-  }));
-  $$("[data-delgoal]").forEach(b=>b.addEventListener("click", async ()=>{ const id=b.dataset.delgoal; const i=S().goals.findIndex(x=>x.id===id); if(i>=0){ await audit("goal",`Dropped goal "${S().goals[i].title}"`); S().goals.splice(i,1); await Store.save(); renderGoals(); renderStatus(); } }));
+  $$('[data-move]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); const [g,x,d]=b.dataset.move.split('|'); moveStep(g,x,+d); });
+  let drag=null;
+  $$('[data-dragstep]').forEach(el=>{
+    el.ondragstart=()=>{ drag=el.dataset.dragstep; el.classList.add('dragging'); };
+    el.ondragend=()=>{ drag=null; el.classList.remove('dragging'); };
+    el.ondragover=e=>e.preventDefault();
+    el.ondrop=e=>{ e.preventDefault(); if(!drag) return; const [sg,sid]=drag.split('|'),[tg,tid]=el.dataset.dragstep.split('|'); if(sg!==tg||sid===tid)return; const g=S().goals.find(x=>x.id===sg),from=g.plan.steps.findIndex(x=>x.id===sid),to=g.plan.steps.findIndex(x=>x.id===tid); const [item]=g.plan.steps.splice(from,1); g.plan.steps.splice(to,0,item); audit('plan',`Reordered plan step on "${g.title}"`).then(()=>Store.save()).then(()=>renderGoals()); };
+  });
+  $$('[data-tune]').forEach(b=>b.onclick=()=>{ const g=S().goals.find(x=>x.id===b.dataset.tune); openModal(`<h3>Tune goal</h3><div class="sub">Steering rides every planning and execution prompt. Due dates power the 14-day strip and deadline nudges.</div><div class="field"><label>Steering note</label><textarea id="gsteer" rows="3" maxlength="500" placeholder="e.g. Keep it practical; budget ₹5,000; no meetings">${esc(g.note||"")}</textarea></div><div class="field"><label>Due date</label><input id="gdue" type="date" value="${esc(g.due||"")}"></div><div class="row"><button class="btn modal-cancel">Cancel</button><button class="btn pri" id="savetune">Save</button></div>`); $('#savetune').onclick=async()=>{ g.note=$('#gsteer').value.trim(); g.due=$('#gdue').value; closeModal(); await audit('goal',`Updated steering/deadline for "${g.title}"`); await Store.save(); renderGoals(); toast('Goal tuned. New guidance will ride every prompt.'); }; });
+  $$('[data-advance]').forEach(b=>b.onclick=()=>advanceGoal(b.dataset.advance));
+  $$('[data-team]').forEach(b=>b.onclick=()=>{ const [gid,md]=b.dataset.team.split('|'); runTeam(gid,md); });
+  $$('[data-discuss]').forEach(b=>b.onclick=e=>{ switchView('chat'); const goal=S().goals.find(x=>x.id===e.currentTarget.dataset.discuss); if(goal){ $('#chatinput').value=`About my goal "${goal.title}": `; $('#chatinput').focus(); } });
+  $$('[data-reopen]').forEach(b=>b.onclick=async e=>{ if(e.target.closest('button'))return; const [gid,sid]=b.dataset.reopen.split('|'); const g=S().goals.find(x=>x.id===gid),st=g&&g.plan.steps.find(x=>x.id===sid); if(!st)return; st.status='todo';st.output='';g.status='active';await audit('plan',`Reopened step: "${st.title}" (goal: "${g.title}")`);await Store.save();renderGoals();renderStatus();toast('Step reopened.'); });
+  $$('[data-delgoal]').forEach(b=>b.onclick=async()=>{ const id=b.dataset.delgoal,i=S().goals.findIndex(x=>x.id===id);if(i>=0){await audit('goal',`Dropped goal "${S().goals[i].title}"`);S().goals.splice(i,1);await Store.save();renderGoals();renderStatus();} });
 }
 function switchView(name){
   $$(".navbtn").forEach(x=>x.classList.toggle("on", x.dataset.view===name));
@@ -670,15 +706,15 @@ function sentinelCheck(step){
 }
 
 /* ---------------- goals engine ---------------- */
-async function createGoal(title){
+async function createGoal(title, opts={}){
   const s=S();
-  const g={id:uid("goal"), title, created:nowISO(), status:"planning", plan:{steps:[]}};
+  const g={id:uid("goal"), title, created:nowISO(), due:opts.due||"", note:opts.note||"", status:"planning", plan:{steps:[]}};
   s.goals.unshift(g); renderGoals(); renderStatus();
   await audit("goal", `Goal accepted: "${title}" - planning`);
   try{
     const raw = await chatOnce([
       {role:"system", content:`You are the planning core of a personal agent. Break the user's goal into 4-7 concrete steps. Output JSON only: {"steps":[{"title":"...","kind":"agent"|"user"}]}. kind "agent" = the agent can do it in chat (research, drafting, writing, planning, analysis, learning, comparison, checklists). kind "user" = strictly requires the human's body or accounts in the real world (buying groceries, physically cooking, attending). Prefer agent steps - most steps of most goals are agent-doable; a good plan usually has at most 1-2 user steps. Steps that send/share/buy/book anything must be phrased as drafts or preparations, since a human always does the final external act.`},
-      {role:"user", content:`Goal: ${title}`}
+      {role:"user", content:`Goal: ${title}\n${g.note?`Steering: ${g.note}`:""}\n${g.due?`Due: ${g.due}`:""}` }
     ], true);
     const plan=JSON.parse(raw);
     g.plan.steps=(plan.steps||[]).slice(0,8).map(x=>({id:uid("step"), title:String(x.title||"step"), kind:x.kind==="user"?"user":"agent", status:"todo", output:""}));
@@ -699,7 +735,7 @@ async function createGoal(title){
 async function advanceGoal(id){
   const s=S(); const g=s.goals.find(x=>x.id===id); if(!g) return;
   const step=g.plan.steps.find(x=>x.status==="todo"||x.status==="approval");
-  if(!step){ g.status="done"; await audit("goal",`Goal complete: "${g.title}"`); await logWork(`Goal complete: "${g.title}"`); await Store.save(); renderGoals(); renderStatus(); toast("Goal complete."); return; }
+  if(!step){ g.status="done"; await audit("goal",`Goal complete: "${g.title}"`); await logWork(`Goal complete: "${g.title}"`); await Store.save(); renderGoals(); renderStatus(); toast("Goal complete - archived with its outputs."); return; }
   if(step.kind==="user"){
     await audit("plan",`Step needs the human: "${step.title}"`);
     step.status="done"; g.status = g.plan.steps.every(x=>x.status==="done")?"done":"active";
@@ -717,6 +753,7 @@ async function advanceGoal(id){
 }
 
 async function runStep(g, step){
+  const guidance=[g.note?`Steering note: ${g.note}`:"",g.due?`Deadline: ${g.due} (${dueInfo(g)?.label||""})`:""].filter(Boolean).join("\n");
   const prior = g.plan.steps.filter(x=>x.status==="done"&&x.output).map(x=>`Earlier step "${x.title}" produced:\n${x.output.slice(0,900)}`).join("\n\n");
   step.status="doing"; renderGoals();
   setRT({state:"working", step:step.title, tool:""});
@@ -724,7 +761,7 @@ async function runStep(g, step){
   try{
     const out = await chatOnce([
       {role:"system", content: systemPrompt(g.title+" "+step.title)},
-      {role:"user", content:`Execute this step of my goal and give me the finished work product, not a description of what you would do. Never say you cannot - produce the best possible artifact with what you know.\nGoal: ${g.title}\nStep: ${step.title}\n${prior}\nProduce the actual artifact (draft text, plan, analysis, checklist, etc).`}
+      {role:"user", content:`Execute this step of my goal and give me the finished work product, not a description of what you would do. Never say you cannot - produce the best possible artifact with what you know.\nGoal: ${g.title}\nStep: ${step.title}\n${guidance}\n${prior}\nProduce the actual artifact (draft text, plan, analysis, checklist, etc).`}
     ]);
     step.output=out; step.status="done";
     await addMsg("muse", `Done with “${step.title}” (${g.title}):\n\n${out.slice(0,1800)}`);
@@ -737,6 +774,7 @@ async function runStep(g, step){
     await audit("error",`Step failed: "${step.title}" (${e.message})`);
   }
   g.status = g.plan.steps.every(x=>x.status==="done") ? "done" : "active";
+  if(g.status==="done") toast("Goal complete - archived with its outputs.");
   setRT({state:"idle", step:"", tool:""});
   await Store.save(); renderAll();
 }
@@ -1144,11 +1182,11 @@ $("#wipemembtn").addEventListener("click", async ()=>{
   S().memory=[]; await audit("memory","All memories forgotten on request"); await Store.save(); renderMemory(); renderStatus(); toast("All memories forgotten.");
 });
 $("#newgoalbtn").addEventListener("click", ()=>{
-  openModal(`<h3>New goal</h3><div class="sub">State it plainly. Muse will break it into steps and start advancing them.</div>
-  <div class="field"><input id="ngoal" placeholder="e.g. train for a 10k in 10 weeks"></div>
-  <div class="row"><button class="btn modal-cancel">Cancel</button><button class="btn pri" id="gogoal">Plan it</button></div>`);
-  $("#gogoal").onclick=async ()=>{ const v=$("#ngoal").value.trim(); if(!v) return; closeModal(); await createGoal(v.charAt(0).toUpperCase()+v.slice(1)); };
+  openModal(`<h3>New goal</h3><div class="sub">Add optional steering and a due date. Both ride the plan from the start.</div><div class="field"><label>Goal</label><input id="ngoal" placeholder="e.g. train for a 10k in 10 weeks"></div><div class="field"><label>Steering note</label><textarea id="nsteer" rows="2" maxlength="500" placeholder="Constraints, style, budget, or what to avoid"></textarea></div><div class="field"><label>Due date</label><input id="ndue" type="date"></div><div class="row"><button class="btn modal-cancel">Cancel</button><button class="btn pri" id="gogoal">Plan it</button></div>`);
+  $("#gogoal").onclick=async ()=>{ const v=$("#ngoal").value.trim(); if(!v)return; const note=$("#nsteer").value.trim(),due=$("#ndue").value; closeModal(); await createGoal(v.charAt(0).toUpperCase()+v.slice(1),{note,due}); };
 });
+$("#exportmd").onclick=async()=>{ downloadText("open-muse-goals.md","text/markdown",goalsMarkdown()); await audit("goal","Exported goals as Markdown"); toast("Markdown export downloaded."); };
+$("#exportcsv").onclick=async()=>{ downloadText("open-muse-goals.csv","text/csv",goalsCSV()); await audit("goal","Exported goals as CSV"); toast("CSV export downloaded."); };
 
 /* composer */
 const ta=$("#chatinput");
@@ -2041,7 +2079,7 @@ async function runTeam(goalId, mode){
       try{
         let out = await ai.generateText({messages:[
           {role:"system",content:AgentRoles[ag.role]},
-          {role:"user",content:ag.task}
+          {role:"user",content:ag.task+(g.note?`\nSteering: ${g.note}`:"")+(g.due?`\nDue: ${g.due}`:"")}
         ]});
         if(ag.role==="researcher"){
           const calls=parseToolCalls(out);
@@ -2064,7 +2102,7 @@ async function runTeam(goalId, mode){
     else{
       merged = await ai.generateText({messages:[
         {role:"system",content:"You are the orchestrator. Merge your agent team's work into one coherent deliverable: keep what survives scrutiny, drop what does not. End with one line naming what you merged."},
-        {role:"user",content:`Goal: ${g.title}\n\n`+ok.map(x=>`[${x.role} - ${x.task}]\n${x.output}`).join("\n\n---\n\n")}
+        {role:"user",content:`Goal: ${g.title}\n${g.note?`Steering: ${g.note}\n`:""}${g.due?`Due: ${g.due}\n`:""}\n`+ok.map(x=>`[${x.role} - ${x.task}]\n${x.output}`).join("\n\n---\n\n")}
       ]});
     }
     await addMsg("muse", `Team merge on \u201c${g.title}\u201d (${ok.length}/${TEAM.agents.length} agents delivered):\n\n${merged}`);
@@ -2188,3 +2226,4 @@ async function finishBoot(){
   setTimeout(()=>{ const g=S() && S().goals.find(x=>x.status==="active"); if(g) autoAdvance(g.id); }, 6000);
   setPresence("idle");
 }
+
