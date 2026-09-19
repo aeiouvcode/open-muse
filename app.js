@@ -570,7 +570,7 @@ async function chatStream(messages, onTok){
     let i; while((i=buf.indexOf("\n"))>=0){
       const line=buf.slice(0,i).trim(); buf=buf.slice(i+1);
       if(!line.startsWith("data:")) continue;
-      const d=line.slice(5).trim(); if(d==="[DONE]") return out;
+      const d=line.slice(5).trim(); if(d==="[DONE]") return Cloak.back(out);
       try{ const tok=JSON.parse(d).choices?.[0]?.delta?.content || ""; if(tok){ out+=tok; onTok && onTok(Cloak.back(out)); } }catch(e){}
     }
   }
