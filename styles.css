@@ -422,3 +422,13 @@ body.agent-busy #mstrip .ms-dot{background:var(--acc2);animation:st-pulse 1.5s v
 [data-theme="serious"] .evo .chg b{color:var(--acc2)}
 [data-theme="serious"] .codeblock .dl.hunk{color:var(--acc2)}
 [data-theme="serious"] .swatch{border-radius:4px}
+
+
+/* MiniMax Code patterns, rebuilt for the local-first Coder workspace */
+.coderbench{margin:10px 20px 0;border:1px solid var(--line);background:color-mix(in srgb,var(--paper) 92%,var(--accent) 8%);border-radius:10px;padding:10px 12px;color:var(--ink)}
+#modebar.coder+.coderbench{display:block!important}
+.cb-main{display:flex;align-items:stretch;gap:7px;flex-wrap:wrap}.cb-main button{font:inherit;color:inherit;background:var(--paper);border:1px solid var(--line);border-radius:7px;min-height:42px;padding:6px 11px;cursor:pointer;text-align:left}.cb-main button:hover{border-color:var(--accent)}
+.cb-plan{display:grid!important;grid-template-columns:10px auto;column-gap:8px;min-width:205px}.cb-plan .cb-led{grid-row:1/3;width:8px;height:8px;border-radius:99px;background:var(--dim2);margin-top:5px}.cb-plan b,.cb-session b{font-size:12px}.cb-plan small{grid-column:2;font-size:10px;color:var(--dim)}.cb-plan.on{border-color:var(--accent);background:color-mix(in srgb,var(--paper) 86%,var(--accent) 14%)}.cb-plan.on .cb-led{background:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 16%,transparent)}
+.cb-session{display:flex!important;flex-direction:column;min-width:130px}.cb-session span{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim)}.cb-action{font-size:11px!important}.cb-context{display:grid;grid-template-columns:auto minmax(90px,1fr) auto auto;gap:8px;align-items:center;margin-top:9px;font-size:10px;color:var(--dim)}.cb-track{height:4px;background:var(--line);border-radius:9px;overflow:hidden}.cb-track i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}.cb-context b{color:var(--ink);font-size:10px}.cb-resume{border-top:1px solid var(--line);margin-top:9px;padding-top:8px;font-size:10px;line-height:1.45;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.msg.checkpoint{border-left:3px solid var(--accent);background:color-mix(in srgb,var(--paper) 90%,var(--accent) 10%)}
+@media(max-width:700px){.coderbench{margin:8px 10px 0;padding:9px}.cb-plan{min-width:170px;flex:1}.cb-session{min-width:105px}.cb-action{flex:1;text-align:center!important}.cb-context{grid-template-columns:auto 1fr auto}.cb-contextnote{display:none}.cb-resume{white-space:normal;max-height:44px}.coderbench+.chatlog{} }
