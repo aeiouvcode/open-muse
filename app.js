@@ -1273,7 +1273,7 @@ function checkpointText(){
   const recent=S().chat.filter(m=>!m.kind||m.kind==="checkpoint").slice(-10);
   const asks=recent.filter(m=>m.role==="user").slice(-3).map(m=>String(m.text).replace(/\s+/g," ").slice(0,120));
   const replies=recent.filter(m=>m.role==="muse").slice(-2).map(m=>String(m.text).replace(/```[\s\S]*?```/g,"[code]").replace(/\s+/g," ").slice(0,150));
-  const diff=lastDiff();
+  const diff=extractLastDiff();
   return [asks.length?"Recent asks: "+asks.join(" / "):"No recent ask",replies.length?"Muse: "+replies.join(" / "):"No answer yet",diff?"A draft diff is present and still needs review/testing.":"No draft diff in the recent transcript."].join(" ");
 }
 async function saveCoderSession(){
