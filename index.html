@@ -59,6 +59,16 @@
         <button class="btn coderonly" id="selftestsbtn">Self-tests</button>
         <button class="btn coderonly" id="diff2prop">Last diff &rarr; proposal</button>
       </div>
+      <div id="coderbench" class="coderbench coderonly" hidden>
+        <div class="cb-main">
+          <button class="cb-plan" id="coderplan" aria-pressed="false"><span class="cb-led"></span><b>Plan mode</b><small>inspect first, no tool calls</small></button>
+          <button class="cb-session" id="codersessions"><span>Session</span><b id="codersessionname">Main</b></button>
+          <button class="cb-action" id="codercheckpoint">Checkpoint</button>
+          <button class="cb-action" id="codercompact">Compact</button>
+        </div>
+        <div class="cb-context"><span>Context</span><div class="cb-track"><i id="codercontextbar"></i></div><b id="codercontexttext">0%</b><span id="codercontextnote">fresh</span></div>
+        <div class="cb-resume" id="coderresume">No checkpoint yet. Muse will preserve decisions, changed files and next steps locally.</div>
+      </div>
       <div id="chatlog"></div>
       <div id="composer">
         <textarea id="chatinput" placeholder="Tell Muse what needs to get done...  (try: 'my goal is to run a 10k in 10 weeks')" rows="1"></textarea>
@@ -264,4 +274,5 @@
 <script src="app.js"></script>
 </body>
 </html>
+
 
