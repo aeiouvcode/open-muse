@@ -19,7 +19,9 @@ const Store = {
   KEY: "openmuse.store.v1",
   default(){
     return {
-      settings: { provider: "openrouter", model: "", hasKey: false, saveKey: false, keyStored: "", mode: "agent", searchProvider: "tavily", searchKey: "", openNetwork: false, skillsOff: [], autonomy: true, theme: "serious", density: "comfortable", font: "m", statusStrip: true },
+      settings: { provider: "openrouter", model: "", hasKey: false, saveKey: false, keyStored: "", mode: "agent", searchProvider: "tavily", searchKey: "", openNetwork: false, skillsOff: [], autonomy: true, theme: "serious", density: "comfortable", font: "m", statusStrip: true, localUrl: "http://localhost:11434/v1" },
+      cloak: { on: false, rules: [] },   // {id, real, twin, kind, auto, created} - twins never leave the device
+      habits: [],        // {id,name,cadence:"daily"|"weekly",created,checks:[day-or-week keys]}
       chat: [],          // {role, text, ts, kind}
       goals: [],         // {id,title,created,due,note,plan:{steps:[]},status}
       memory: [],        // {id,text,ts,source}
@@ -106,9 +108,20 @@ const PROVIDERS = {
                  fallback:["openai/gpt-4o-mini","openai/gpt-4o","anthropic/claude-sonnet-4.5","google/gemini-2.5-flash","deepseek/deepseek-chat-v3-0324"] },
   tokenharbor: { name:"Token Harbor", url:"https://tokenharbor.ai/v1/chat/completions",    modelsUrl:"https://tokenharbor.ai/v1/models",    defModel:"deepseek-v4.1-flash:free", keyPh:"thk_live_...", hint:"Universal Key from the tokenharbor.ai dashboard - :free models never charge",
                  fallback:["deepseek-v4.1-flash:free","mimo-v2.5:free","muse-spark-3","kimi-k3","glm-5.3","gemini-3.8-flash"] },
+  local:       { name:"Local model",  local:true, defModel:"", keyPh:"no key needed", hint:"runs entirely on your machine - Ollama (ollama serve) or LM Studio's local server. No key, no cloud: prompts never leave this device.",
+                 fallback:[] },
 };
 const provider = () => PROVIDERS[S().settings.provider] || PROVIDERS.openrouter;
 const activeModel = () => S().settings.model || provider().defModel;
+/* local provider endpoints come from the user-set base URL */
+function provEndpoints(){
+  const p = provider();
+  if(p.local){
+    const base = String(S().settings.localUrl || "http://localhost:11434/v1").replace(/\/+$/,"");
+    return { url: base + "/chat/completions", modelsUrl: base + "/models", base };
+  }
+  return { url: p.url, modelsUrl: p.modelsUrl, base: "" };
+}
 
 /* ---------------- audit ---------------- */
 /* worklog: persistent milestone doc so any later session resumes cleanly.
@@ -198,6 +211,7 @@ function renderStatus(){
   $("#st-model").title = m || "";
   $("#st-model").classList.toggle("muted", !m);
   $("#st-key").textContent = keyTxt || "none yet";
+  const cl=$("#st-cloak"); if(cl){ cl.textContent = Cloak.on() ? `on \u00b7 ${Cloak.rules().length} rule${Cloak.rules().length===1?"":"s"}` : "off"; cl.classList.toggle("muted", !Cloak.on()); }
   $("#st-key").classList.toggle("muted", !keyTxt);
   $("#st-actions").textContent = s.counters.actions;
   const pending = s.goals.flatMap(g=>g.plan.steps).filter(x=>x.status==="approval").length;
@@ -360,10 +374,10 @@ function renderGoals(){
 function switchView(name){
   $$(".navbtn").forEach(x=>x.classList.toggle("on", x.dataset.view===name));
   $$(".view").forEach(v=>v.classList.toggle("on", v.id==="view-"+name));
-  if(name==="settings"){ $("#setprovider").value = S().settings.provider || "openrouter"; $("#setsavekey").checked = !!S().settings.keyStored; $("#setstrip").checked = S().settings.statusStrip !== false; syncProviderUI(); populateModelSelect(); }
+  if(name==="settings"){ $("#setprovider").value = S().settings.provider || "openrouter"; $("#setsavekey").checked = !!S().settings.keyStored; $("#setstrip").checked = S().settings.statusStrip !== false; syncProviderUI(); populateModelSelect(); renderCloak(); }
   if(name==="evolve") renderEvolutions();
 }
-function renderAll(){ renderGoals(); renderMemory(); renderConnectors(); renderAudit(); renderStatus(); renderChat(); renderCoderWorkbench(); renderEvolutions(); renderTasks(); renderRems(); renderTools(); renderSkills(); renderMcps(); renderStudio(); renderWorkforce(); }
+function renderAll(){ renderGoals(); renderMemory(); renderConnectors(); renderAudit(); renderStatus(); renderChat(); renderCoderWorkbench(); renderEvolutions(); renderTasks(); renderRems(); renderTools(); renderSkills(); renderMcps(); renderStudio(); renderWorkforce(); renderHabits(); renderCloak(); }
 
 /* ---------------- chat ---------------- */
 function addMsg(role, text, kind){
@@ -414,12 +428,116 @@ function mdLite(t){
   return out + inlineMd(rest);
 }
 
+/* ---------------- privacy cloak (AgentCloak-style, fully local) ----------------
+   Before any text leaves for a model call, structured private data and
+   user-taught values are swapped for consistent synthetic twins kept in the
+   local (optionally encrypted) store. Replies are un-swapped before display,
+   so the user always reads their real data and the provider never sees it.
+   Audit records counts and kinds only - never values, never twins. */
+const CLOAK_NAME_POOL = ["Alex Morgan","Priya Nair","Jordan Lee","Sam Whitfield","Meera Kulkarni","Tom Eriksen","Nina Rao","Chris Delacroix","Ravi Menon","Sara Lindqvist","Dev Patel","Kate Osei","Arjun Shah","Lena Fischer","Omar Haddad","Tara Byrne","Vikram Iyer","Julia Moreau","Aditya Rao","Elena Petrova"];
+const CLOAK_DETECTORS = [
+  {kind:"email", re:/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g},
+  {kind:"phone", re:/\+\d[\d\s().-]{7,16}\d|\b\d{3}[ -]\d{3}[ -]\d{4}\b/g},
+  {kind:"card",  re:/\b(?:\d[ -]?){13,19}\b/g, luhn:true},
+  {kind:"id",    re:/\b\d{3}-\d{2}-\d{4}\b/g},
+];
+function luhnOk(num){ const d=num.replace(/\D/g,""); if(d.length<13||d.length>19) return false; let sum=0,alt=false; for(let i=d.length-1;i>=0;i--){ let n=+d[i]; if(alt){ n*=2; if(n>9)n-=9; } sum+=n; alt=!alt; } return sum%10===0; }
+function cloakPick(str,n){ let h=0; for(const c of String(str)) h=(h*31 + c.codePointAt(0))>>>0; return h%n; }
+function cloakTwin(real, kind){
+  if(kind==="email") return CLOAK_NAME_POOL[cloakPick(real,CLOAK_NAME_POOL.length)].toLowerCase().replace(/[^a-z]+/g,".")+"@example.com";
+  if(kind==="phone") return "+1 555 01"+String(cloakPick(real,90)+10);
+  if(kind==="card")  return "4111 1111 1111 "+String(1000+cloakPick(real,9000));
+  if(kind==="id")    return "9"+String(10+cloakPick(real,89))+"-55-"+String(7000+cloakPick(real+"x",999));
+  return CLOAK_NAME_POOL[cloakPick(real,CLOAK_NAME_POOL.length)];
+}
+function escRe(s){ return s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"); }
+const Cloak = {
+  sessionSwaps: 0, _audited: false,
+  box(){ const s=S(); if(s && !s.cloak) s.cloak={on:false,rules:[]}; return s ? s.cloak : {on:false,rules:[]}; },
+  on(){ return !!this.box().on; },
+  rules(){ return this.box().rules; },
+  isTwin(v){ return this.rules().some(x=>x.twin===v); },
+  ensure(real, kind, auto){
+    real=String(real).trim(); if(!real) return null;
+    const ex=this.rules().find(x=>x.real.toLowerCase()===real.toLowerCase());
+    if(ex) return ex;
+    const rule={id:uid("cl"), real:real.slice(0,120), twin:cloakTwin(real,kind), kind:kind||"custom", auto:!!auto, created:nowISO()};
+    let n=2; while(this.rules().some(x=>x.twin===rule.twin)){ rule.twin=rule.twin.replace(/[ -]?\d*$/,"")+"-"+(n++); if(n>12){ rule.twin=rule.twin+"-"+uid("t").slice(-4); break; } }
+    this.box().rules.push(rule);
+    return rule;
+  },
+  /* transform outbound text: returns {text, swaps, kinds} */
+  outText(text){
+    if(!this.on() || !text) return {text, swaps:0, kinds:[]};
+    let swaps=0; const kinds=new Set();
+    // known rules first, longest real value first so overlapping values resolve sanely
+    for(const r of this.rules().slice().sort((x,y)=>y.real.length-x.real.length)){
+      if(!r.real) continue;
+      const re=new RegExp(escRe(r.real),"gi");
+      text=text.replace(re, ()=>{ swaps++; kinds.add(r.kind); return r.twin; });
+    }
+    // auto-detect structured PII in what remains; skip anything already a twin
+    for(const det of CLOAK_DETECTORS){
+      det.re.lastIndex=0;
+      const found=text.match(det.re)||[];
+      for(const m of found){
+        if(det.luhn && !luhnOk(m)) continue;
+        if(this.isTwin(m)) continue;
+        const rule=this.ensure(m, det.kind, true);
+        if(!rule) continue;
+        const re=new RegExp(escRe(m),"g");
+        text=text.replace(re, ()=>{ swaps++; kinds.add(det.kind); return rule.twin; });
+      }
+    }
+    return {text, swaps, kinds:[...kinds]};
+  },
+  out(messages){
+    if(!this.on()) return messages;
+    let total=0; const kinds=new Set();
+    const t=messages.map(m=>{
+      if(typeof m.content!=="string") return m;
+      const r=this.outText(m.content);
+      total+=r.swaps; r.kinds.forEach(k=>kinds.add(k));
+      return r.swaps ? {...m, content:r.text} : m;
+    });
+    if(total){
+      this.sessionSwaps+=total;
+      const c=S(); c.counters.cloakSwaps=(c.counters.cloakSwaps||0)+total;
+      if(!this._audited){ this._audited=true; audit("cloak","Cloak engaged on outbound calls - values stay on this device (counts only, never values)"); }
+      renderStatus();
+    }
+    return t;
+  },
+  back(text){
+    if(!this.on() || !text) return text;
+    for(const r of this.rules().slice().sort((x,y)=>y.twin.length-x.twin.length)){
+      if(!r.twin) continue;
+      text=text.split(r.twin).join(r.real);
+    }
+    return text;
+  }
+};
+function renderCloak(){
+  if(!S()) return;
+  $("#cloakon").checked = Cloak.on();
+  const box=$("#cloakrules"); const rules=Cloak.rules();
+  box.innerHTML = rules.length ? rules.map(r=>`<div class="skill"><span class="txt"><b>${esc(r.real)}</b><span>becomes "${esc(r.twin)}" - ${r.kind}${r.auto?" (auto-detected)":""}</span></span><button class="btn badb" data-cloakdel="${r.id}" style="padding:3px 9px">\u00d7</button></div>`).join("")
+    : `<div class="small" style="font-size:12px;color:var(--dim2)">Nothing taught yet. Structured data (emails, phones, card and ID numbers) is still detected automatically when the cloak is on.</div>`;
+  $$("#cloakrules [data-cloakdel]").forEach(b=>b.onclick=async()=>{ const i=Cloak.rules().findIndex(x=>x.id===b.dataset.cloakdel); if(i>=0){ Cloak.rules().splice(i,1); await audit("cloak","Removed a cloak rule"); await Store.save(); renderCloak(); } });
+  const tot=(S().counters.cloakSwaps||0);
+  $("#cloakstats").textContent = Cloak.on()
+    ? `Cloak is ON - ${rules.length} rule${rules.length===1?"":"s"}, ${tot} value${tot===1?"":"s"} cloaked so far${Cloak.sessionSwaps?` (${Cloak.sessionSwaps} this session)`:""}.`
+    : `Cloak is off - prompts go to your provider exactly as written.${tot?` ${tot} values were cloaked before it was turned off.`:""}`;
+}
+
 /* ---------------- model ---------------- */
 function getKey(){ return sessionStorage.getItem("openmuse.key") || (S() && S().settings.keyStored) || ""; }
 /* human-readable model errors: never show raw provider JSON in chat */
 function friendlyModelError(e){
   const m = String(e && e.message || e);
-  if(m==="no-key") return "No model key set. Open Muse is BYO-key: paste a key in Settings (OpenRouter or Token Harbor) - it stays in this browser.";
+  if(m==="no-key") return "No model key set. Open Muse is BYO-key: paste a key in Settings (OpenRouter or Token Harbor) - it stays in this browser. Or pick the Local provider and run a model on this machine with no key at all.";
+  if(m==="no-model") return "No model selected. Open Settings and refresh the model list once your local server is up - or just type the model id (e.g. llama3.1:8b).";
+  if(S() && provider().local && /failed to fetch|networkerror|load failed/i.test(m)) return "Could not reach the local model server at " + (S().settings.localUrl||"http://localhost:11434/v1") + ". Start Ollama (ollama serve) or LM Studio's server there, then try again. Nothing left this device.";
   const st = m.match(/\bmodel (\d{3})\b/) || m.match(/\b(401|402|403|404|408|409|429|5\d\d)\b/);
   const code = st ? st[1] : "";
   if(code==="401") return "The provider rejected the call as unauthenticated (401) - the key is missing, malformed or revoked. Check it in Settings, or switch provider.";
@@ -433,11 +551,15 @@ function friendlyModelError(e){
 }
 
 async function chatStream(messages, onTok){
-  const key=getKey();
-  if(!key) throw new Error("no-key");
-  const r = await fetch(provider().url, {
+  const key=getKey(); const prov=provider(); const ep=provEndpoints();
+  if(!key && !prov.local) throw new Error("no-key");
+  if(prov.local && !activeModel()) throw new Error("no-model");
+  messages = Cloak.out(messages);
+  const headers = { "Content-Type":"application/json" };
+  if(key) headers["Authorization"] = "Bearer " + key;
+  const r = await fetch(ep.url, {
     method:"POST",
-    headers:{ "Authorization":"Bearer "+key, "Content-Type":"application/json" },
+    headers,
     body: JSON.stringify({ model: activeModel(), messages, stream:true, temperature:0.7 })
   });
   if(!r.ok){ const t=await r.text(); throw new Error("model "+r.status+": "+t.slice(0,160)); }
@@ -449,19 +571,23 @@ async function chatStream(messages, onTok){
       const line=buf.slice(0,i).trim(); buf=buf.slice(i+1);
       if(!line.startsWith("data:")) continue;
       const d=line.slice(5).trim(); if(d==="[DONE]") return out;
-      try{ const tok=JSON.parse(d).choices?.[0]?.delta?.content || ""; if(tok){ out+=tok; onTok && onTok(out); } }catch(e){}
+      try{ const tok=JSON.parse(d).choices?.[0]?.delta?.content || ""; if(tok){ out+=tok; onTok && onTok(Cloak.back(out)); } }catch(e){}
     }
   }
-  return out;
+  return Cloak.back(out);
 }
 async function chatOnce(messages, json, model){
-  const key=getKey(); if(!key) throw new Error("no-key");
+  const key=getKey(); const prov=provider(); const ep=provEndpoints();
+  if(!key && !prov.local) throw new Error("no-key");
+  if(prov.local && !(model || activeModel())) throw new Error("no-model");
+  messages = Cloak.out(messages);
   const body={ model: model || activeModel(), messages, temperature:0.3 };
-  const purl = provider().url;
   if(json) body.response_format={type:"json_object"};
-  const r=await fetch(purl,{method:"POST",headers:{"Authorization":"Bearer "+key,"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const headers = { "Content-Type":"application/json" };
+  if(key) headers["Authorization"] = "Bearer " + key;
+  const r=await fetch(ep.url,{method:"POST",headers,body:JSON.stringify(body)});
   if(!r.ok) throw new Error("model "+r.status);
-  return (await r.json()).choices[0].message.content;
+  return Cloak.back((await r.json()).choices[0].message.content);
 }
 
 /* ---------------- AI SDK-shaped protocol ----------------
@@ -1058,6 +1184,16 @@ async function proactiveNudge(){
     return;
   }
   sessionStorage.removeItem("openmuse.nudged");
+  if(new Date().getHours()>=17){
+    const dueHabit=(S().habits||[]).find(h=>!habitDoneNow(h));
+    if(dueHabit){
+      await propose("habit-due", `<b>Muse, unprompted:</b> "${esc(dueHabit.name)}" is still unchecked ${dueHabit.cadence==="weekly"?"this week":"today"}${habitStreak(dueHabit)>0?` - ${habitStreak(dueHabit)} in a row on the line`:""}. Done it?`, async ()=>{
+        await toggleHabit(dueHabit.id);
+        await addMsg("muse", `Checked in "${esc(dueHabit.name)}". Streak's alive.`); await Store.save(); renderChat();
+      });
+      return;
+    }
+  }
   const stale = S().tasks.find(t=>t.status==="open" && Date.now()-new Date(t.created).getTime() > 24*3600*1000);
   if(stale){
     await propose("stale-task", `<b>Muse, unprompted:</b> "${esc(stale.text)}" has sat open since ${new Date(stale.created).toLocaleDateString()}. Want help closing it out?`, async ()=>{
@@ -1094,8 +1230,9 @@ async function fetchCatalog(pv){
   const prov = PROVIDERS[pv] || PROVIDERS.openrouter;
   const key = getKey();
   if(pv === "tokenharbor" && !key) return null;   // TH catalog is auth-gated
+  const mu = prov.local ? provEndpoints().modelsUrl : prov.modelsUrl;
   try{
-    const r = await fetch(prov.modelsUrl, {headers: key ? {"Authorization":"Bearer "+key} : {}});
+    const r = await fetch(mu, {headers: key ? {"Authorization":"Bearer "+key} : {}});
     if(!r.ok) return null;
     const j = await r.json();
     const ids = (j.data||[]).map(m=>m.id).filter(Boolean);
@@ -1110,7 +1247,14 @@ async function populateModelSelect(){
   sel.innerHTML = `<option value="">loading catalog...</option>`;
   let ids = await fetchCatalog(pv);
   let note = "";
-  if(!ids){ ids = prov.fallback.slice(); note = pv==="tokenharbor" && !getKey() ? "enter a key to load the full catalog" : "catalog unavailable - showing common models"; }
+  if(prov.local){
+    $("#setmodelcustom").hidden = false;
+    if(!ids){ ids = []; note = "no local server found at " + (S().settings.localUrl||"http://localhost:11434/v1") + " - start Ollama or LM Studio, press \u21bb, or type the model id below"; }
+    else note = ids.length + " model" + (ids.length===1?"":"s") + " served locally - prompts never leave this device";
+  } else {
+    $("#setmodelcustom").hidden = true;
+    if(!ids){ ids = prov.fallback.slice(); note = pv==="tokenharbor" && !getKey() ? "enter a key to load the full catalog" : "catalog unavailable - showing common models"; }
+  }
   // free models to the top, FREE-marked (Token Harbor convention), rest alphabetical
   const free = ids.filter(id=>id.endsWith(":free")).sort();
   const paid = ids.filter(id=>!id.endsWith(":free")).sort();
@@ -1128,21 +1272,38 @@ function syncProviderUI(){
   const prov = PROVIDERS[pv] || PROVIDERS.openrouter;
   $("#setkey").placeholder = prov.keyPh;
   $("#keyhint").textContent = prov.hint;
+  const isLocal = !!prov.local;
+  $("#localurlwrap").hidden = !isLocal;
+  $("#setkey").disabled = isLocal;
+  $("#setsavekey").disabled = isLocal;
+  $("#keylabel").textContent = isLocal
+    ? "No API key - a local model runs on this machine and prompts never leave it"
+    : "API key (stored in this browser only, sent only to your provider)";
+  if(isLocal) $("#setlocalurl").value = S().settings.localUrl || "http://localhost:11434/v1";
 }
 $("#setprovider").addEventListener("change", ()=>{ syncProviderUI(); populateModelSelect(); });
 $("#refreshmodels").addEventListener("click", populateModelSelect);
 $("#savesettings").addEventListener("click", async ()=>{
   const k=$("#setkey").value.trim(), m=$("#setmodel").value, p=$("#setpass").value;
   const pv=$("#setprovider").value, remember=$("#setsavekey").checked;
+  const isLocal = pv==="local";
   S().settings.provider = pv;
-  if(k){
+  if(isLocal){
+    const base=$("#setlocalurl").value.trim() || "http://localhost:11434/v1";
+    if(!/^https?:\/\/[\w.:\/-]+$/.test(base)){ toast("Local server URL looks wrong - e.g. http://localhost:11434/v1"); return; }
+    S().settings.localUrl = base;
+  }
+  if(k && !isLocal){
     sessionStorage.setItem("openmuse.key", k);
     S().settings.hasKey=true;
     if(remember) S().settings.keyStored = k;
   }
   if(!remember) S().settings.keyStored = "";
-  if(m && !/^[\w.:/-]{1,100}$/.test(m)){ toast("Model id has invalid characters."); return; }
-  S().settings.model = m;  // blank = provider default
+  const custom = isLocal ? $("#setmodelcustom").value.trim() : "";
+  const chosen = custom || m;
+  if(chosen && !/^[\w.:/-]{1,100}$/.test(chosen)){ toast("Model id has invalid characters."); return; }
+  S().settings.model = chosen;  // blank = provider default
+  if(isLocal) $("#setmodelcustom").value = "";
   if(p){
     if(p.length < 8){ toast("Passphrase needs at least 8 characters."); return; }
     $("#setpass").value = "";
@@ -1155,6 +1316,37 @@ $("#savesettings").addEventListener("click", async ()=>{
 $("#ms-close").addEventListener("click", async ()=>{ S().settings.statusStrip=false; await Store.save(); renderStatus(); toast("Status strip hidden - turn it back on in Settings."); });
 $("#setstrip").addEventListener("change", async ()=>{ S().settings.statusStrip = $("#setstrip").checked; await Store.save(); renderStatus(); });
 $("#locknowbtn").addEventListener("click", manualLock);
+$("#cloakon").addEventListener("change", async ()=>{
+  Cloak.box().on = $("#cloakon").checked;
+  await audit("cloak", "Privacy cloak " + ($("#cloakon").checked ? "enabled" : "disabled"));
+  await Store.save(); renderCloak(); renderStatus();
+  toast($("#cloakon").checked ? "Cloak on - outbound calls are scrubbed and un-swapped on reply." : "Cloak off - prompts go out exactly as written.");
+});
+$("#cloakadd").addEventListener("click", async ()=>{
+  const real=$("#cloakreal").value.trim(), twin=$("#cloaktwin").value.trim();
+  if(!real){ toast("Enter the real value to cloak."); return; }
+  const r=Cloak.ensure(real, "custom", false);
+  if(twin){
+    if(Cloak.rules().some(x=>x!==r && x.twin===twin)){ toast("That twin is already taken - pick another."); return; }
+    r.twin=twin; r.auto=false;
+  }
+  $("#cloakreal").value=""; $("#cloaktwin").value="";
+  await audit("cloak","Added a cloak rule");
+  await Store.save(); renderCloak(); renderStatus();
+  toast("Cloaked: it becomes \u201c"+r.twin+"\u201d on every outbound call.");
+});
+$("#cloakreal").addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); $("#cloakadd").click(); } });
+$("#addhabitbtn").addEventListener("click", async ()=>{
+  if(!S()) return;
+  const name=$("#newhabit").value.trim().slice(0,80), cadence=$("#newhabitcad").value;
+  if(!name){ toast("Name the habit first."); return; }
+  if((S().habits||[]).some(h=>h.name.toLowerCase()===name.toLowerCase())){ toast("That habit already exists."); return; }
+  S().habits.push({id:uid("hb"), name, cadence, created:nowISO(), checks:[]});
+  $("#newhabit").value="";
+  await audit("habit", `New ${cadence} habit: "${name}"`);
+  await Store.save(); renderHabits(); toast("Habit added - check in when you do it.");
+});
+$("#newhabit").addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); $("#addhabitbtn").click(); } });
 $("#exportbtn").addEventListener("click", async ()=>{
   if(Store.locked && Store.passKey){
     // E2EE export: same AES-GCM envelope as the at-rest store; only your passphrase opens it
@@ -1335,7 +1527,9 @@ const APP_CAPABILITIES = [
   "Approvals: Sentinel pauses sensitive steps; approval cards persist resolved state across reloads",
   "Personal VM: local IndexedDB store, optional AES-GCM at rest with PBKDF2 passphrase, 15-minute idle auto-lock, manual Lock now, encrypted export/import, full wipe",
   "Appearance: four themes (serious/violet/ember/paper), density, font size - user-selectable in Settings",
-  "Model providers: OpenRouter and Token Harbor, live catalog with free-model listing, key in session or encrypted on device",
+  "Model providers: OpenRouter, Token Harbor (live catalog with free-model listing, key in session or encrypted on device), and Local - Ollama/LM Studio over a user-set localhost OpenAI-compatible endpoint, no key, prompts never leave the device",
+  "Privacy cloak: optional AgentCloak-style layer - before any outbound model call, structured PII (emails, phones, card/ID numbers) is auto-detected and user-taught values are swapped for consistent synthetic twins; replies are un-swapped before display; twins stored locally/encrypted, audit logs counts only",
+  "Habits: daily/weekly habits with check-ins and honest streaks (a missed period resets the count, no freebies), due pill in nav, evening proactive nudge, ISO-week buckets for weekly habits",
   "Evolve itself: proposal drafting, hard gates (storage + encryption roundtrip, key configured, schema, size, app-file targets, secret scan, external-call allowlist), approve/reject with persistence, patch-bundle export, handoff to Instinct",
   "Mobile layout: hamburger nav, safe-area composer, dismissible status strip showing working state and queue",
   "Proactivity: stale-step follow-ups and suggestions surfaced in chat"
@@ -1853,9 +2047,85 @@ function renderTasks(){
   $$("#tasklist [data-taskdel]").forEach(b=>b.onclick=async()=>{ const i=S().tasks.findIndex(x=>x.id===b.dataset.taskdel); if(i>=0){ S().tasks.splice(i,1); await Store.save(); renderTasks(); } });
 }
 
+/* ---------------- habits: honest streaks, no freebies ----------------
+   A streak counts consecutive checked periods only. For a daily habit the
+   streak is alive through yesterday if today is unchecked (today still
+   pending), and resets to zero the moment a full day is missed. Weekly
+   habits use ISO weeks. */
+const localDay = (d=new Date()) => d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+function isoWeekKey(d=new Date()){
+  const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));
+  const day=(t.getUTCDay()+6)%7; t.setUTCDate(t.getUTCDate()-day+3);
+  const firstThu=new Date(Date.UTC(t.getUTCFullYear(),0,4));
+  const fd=(firstThu.getUTCDay()+6)%7; firstThu.setUTCDate(firstThu.getUTCDate()-fd+3);
+  return t.getUTCFullYear()+"-W"+String(1+Math.round((t-firstThu)/(7*86400000))).padStart(2,"0");
+}
+const habitKeyNow = h => h.cadence==="weekly" ? isoWeekKey() : localDay();
+const habitDoneNow = h => (h.checks||[]).includes(habitKeyNow(h));
+function habitStreak(h){
+  const set=new Set(h.checks||[]); let n=0;
+  if(h.cadence==="weekly"){
+    const d=new Date(); if(!set.has(isoWeekKey(d))) d.setDate(d.getDate()-7);
+    while(set.has(isoWeekKey(d))){ n++; d.setDate(d.getDate()-7); }
+  } else {
+    const d=new Date(); if(!set.has(localDay(d))) d.setDate(d.getDate()-1);
+    while(set.has(localDay(d))){ n++; d.setDate(d.getDate()-1); }
+  }
+  return n;
+}
+async function toggleHabit(id){
+  const h=(S().habits||[]).find(x=>x.id===id); if(!h) return;
+  h.checks=h.checks||[]; const k=habitKeyNow(h);
+  if(h.checks.includes(k)){
+    h.checks=h.checks.filter(x=>x!==k);
+    await audit("habit",`Unchecked "${h.name}" for ${k}`);
+  } else {
+    h.checks.push(k); h.checks=h.checks.slice(-400);
+    const st=habitStreak(h);
+    await audit("habit",`Checked in "${h.name}" - ${st} ${h.cadence==="weekly"?"week":"day"}${st===1?"":"s"} in a row`);
+    toast(st>1 ? `${h.name}: ${st} in a row.` : `${h.name} checked in.`);
+  }
+  await Store.save(); renderHabits();
+}
+function renderHabits(){
+  const list=$("#habitlist"); if(!list||!S()) return;
+  const hs=S().habits||[];
+  const due=hs.filter(h=>!habitDoneNow(h)).length;
+  const pill=$("#habitdue"); if(pill){ pill.hidden=due===0; pill.textContent=due; pill.title=due+" habit"+(due===1?"":"s")+" not checked in yet"; }
+  if(!hs.length){ list.innerHTML=`<div class="empty">No habits yet. Add one above - "stretch 10 minutes", "read 20 pages" - and check in when you do it. Streaks are honest: a missed day resets the count.</div>`; return; }
+  list.innerHTML = hs.map(h=>{
+    const st=habitStreak(h), done=habitDoneNow(h);
+    let dots="";
+    if(h.cadence==="weekly"){
+      const d=new Date(); const keys=[]; for(let i=5;i>=0;i--){ const t=new Date(d); t.setDate(t.getDate()-7*i); keys.push(isoWeekKey(t)); }
+      dots=keys.map((k,i)=>`<i class="${(h.checks||[]).includes(k)?"on":""}" title="week of ${k}${i===5?" (this week)":""}"></i>`).join("");
+    } else {
+      const keys=[]; for(let i=6;i>=0;i--){ const t=new Date(); t.setDate(t.getDate()-i); keys.push(localDay(t)); }
+      dots=keys.map((k,i)=>`<i class="${(h.checks||[]).includes(k)?"on":""}" title="${k}${i===6?" (today)":""}"></i>`).join("");
+    }
+    return `<div class="habit">
+      <button class="btn ${done?"okb":"pri"}" data-habcheck="${h.id}">${done?"Done "+(h.cadence==="weekly"?"this week":"today")+" \u2713":"Check in"}</button>
+      <span class="txt"><b>${esc(h.name)} <span class="pill" style="font-size:10px">${h.cadence}</span></b>
+      <span>${st>0?`<b class="habstreak">${st} ${h.cadence==="weekly"?"week":"day"}${st===1?"":"s"} in a row</b> \u00b7 `:""}${(h.checks||[]).length} check-in${(h.checks||[]).length===1?"":"s"} total${done?"":" \u00b7 due now"}</span></span>
+      <span class="habdots">${dots}</span>
+      <button class="btn badb" data-habdel="${h.id}" style="padding:3px 9px">\u00d7</button>
+    </div>`;
+  }).join("");
+  $$("#habitlist [data-habcheck]").forEach(b=>b.onclick=()=>toggleHabit(b.dataset.habcheck));
+  $$("#habitlist [data-habdel]").forEach(b=>b.onclick=async()=>{ const i=S().habits.findIndex(x=>x.id===b.dataset.habdel); if(i>=0){ await audit("habit",`Deleted habit "${S().habits[i].name}"`); S().habits.splice(i,1); await Store.save(); renderHabits(); } });
+}
+
 /* ---------------- reminders (orb wake engine) ---------------- */
+function habitTick(){
+  if(!S()) return;
+  const due=(S().habits||[]).filter(h=>!habitDoneNow(h)).length;
+  const pill=$("#habitdue"); if(pill){ pill.hidden=due===0; pill.textContent=due; }
+  if(habitTick._day && habitTick._day!==localDay()) renderHabits();
+  habitTick._day=localDay();
+}
 async function checkReminders(){
   if(!S()) return;
+  habitTick();
   const now=Date.now(); let fired=false;
   for(const r of S().reminders.filter(x=>x.status==="pending" && new Date(x.at).getTime()<=now)){
     r.status="fired"; r.firedAt=nowISO(); r.late = now-new Date(r.at).getTime()>60000; fired=true;
@@ -2484,7 +2754,7 @@ async function finishBoot(){
     await Store.save();
   }
   if(!S().chat.length){
-    await addMsg("muse","Hi - I'm Muse. I run entirely in your browser: your goals, memory and plans live here, not on someone's server. Tell me what needs to get done, or give me a goal and I'll plan it and start working. First, drop a key in Settings so I can think - OpenRouter or Token Harbor both work, and Token Harbor has free models.");
+    await addMsg("muse","Hi - I'm Muse. I run entirely in your browser: your goals, memory and plans live here, not on someone's server. Tell me what needs to get done, or give me a goal and I'll plan it and start working. First, set up a brain in Settings: OpenRouter or Token Harbor keys work (Token Harbor has free models), or pick Local and point me at Ollama or LM Studio on this machine - then nothing leaves the device at all. There's also a privacy cloak in Settings that swaps private details for synthetic twins before any call goes out.");
     await addMsg("sys","Open Muse is open source. The agent is real - it thinks with your own model key - but it acts only inside this browser. External actions come back to you as drafts and preparations; the final send is always yours.");
     await Store.save(); renderChat();
   }
