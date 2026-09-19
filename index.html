@@ -38,6 +38,13 @@
   </aside>
 
   <main>
+    <div id="mstrip" hidden>
+      <span class="ms-dot" id="ms-dot"></span>
+      <span class="ms-text" id="ms-text">Idle</span>
+      <span class="ms-badge" id="ms-pending" hidden>0</span>
+      <span style="flex:1"></span>
+      <button class="ms-x" id="ms-close" title="Hide this strip - re-enable it in Settings" aria-label="Hide status strip">&times;</button>
+    </div>
     <!-- CHAT -->
     <section class="view on" id="view-chat">
       <div id="modebar">
@@ -187,9 +194,13 @@
             <select id="setdensity" style="width:auto"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select>
             <select id="setfont" style="width:auto"><option value="m">Font M</option><option value="s">Font S</option><option value="l">Font L</option></select>
           </div></div>
+        <div class="field" style="display:flex;gap:9px;align-items:center">
+          <input type="checkbox" id="setstrip" style="width:auto" checked>
+          <label for="setstrip" style="margin:0;display:inline;font-size:13px">Status strip on small screens (one line up top showing what Muse is doing - hide it anytime with its &times;)</label></div>
         <div class="field"><label>Compatibility</label><div class="compat" id="compatlist"></div></div>
         <div class="row" style="display:flex;gap:9px">
           <button class="btn pri" id="savesettings">Save settings</button>
+          <button class="btn" id="locknowbtn" title="Wipe the decrypted state and key from memory right now">Lock now</button>
           <button class="btn" id="exportbtn">Export my data</button>
           <button class="btn badb" id="wipeallbtn">Erase everything</button>
         </div>
