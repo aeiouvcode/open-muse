@@ -21,6 +21,7 @@
     <nav>
       <button class="navbtn on" data-view="chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chat</button>
       <button class="navbtn" data-view="goals"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg>Goals &amp; plans</button>
+      <button class="navbtn" data-view="habits"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>Habits <span class="pill" id="habitdue" style="margin-left:auto" hidden>0</span></button>
       <button class="navbtn" data-view="workforce"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>Workforce <span class="pill" id="agentcount" style="margin-left:auto">0</span></button>
       <button class="navbtn" data-view="memory"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 1 7 7c0 2.4-1.2 4-2.5 5.5S15 17.5 15 20a3 3 0 0 1-6 0c0-2.5-.5-3.5-1.5-5.5S5 11.4 5 9a7 7 0 0 1 7-7z"/></svg>Memory <span class="pill" id="memcount" style="margin-left:auto">0</span></button>
       <button class="navbtn" data-view="tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.1-2.1 2.7-2.5z"/></svg>Tools &amp; skills</button>
@@ -88,6 +89,17 @@
           <div id="remlist"></div>
         </div>
         <div id="duestrip" class="duestrip" hidden></div><div class="goalgrid" id="goalgrid"></div>
+      </div>
+    </section>
+
+    <!-- HABITS -->
+    <section class="view" id="view-habits">
+      <div class="viewhead"><div><h2>Habits</h2><div class="sub">Recurring things you want to keep doing. Check in when you do them - streaks count consecutive checked periods only, and a missed day honestly resets to zero. No freebies, no fake streaks.</div></div></div>
+      <div class="viewbody">
+        <div class="taskbox">
+          <div class="trow"><input id="newhabit" placeholder="Habit - e.g. read 20 pages" maxlength="80"><select id="newhabitcad"><option value="daily">Daily</option><option value="weekly">Weekly</option></select><button class="btn" id="addhabitbtn">Add habit</button></div>
+          <div id="habitlist"></div>
+        </div>
       </div>
     </section>
 
@@ -201,7 +213,11 @@
           <select id="setprovider">
             <option value="openrouter">OpenRouter</option>
             <option value="tokenharbor">Token Harbor</option>
+            <option value="local">Local (Ollama / LM Studio)</option>
           </select></div>
+        <div class="field" id="localurlwrap" hidden><label>Local server base URL</label>
+          <input id="setlocalurl" placeholder="http://localhost:11434/v1" autocomplete="off" spellcheck="false">
+          <div class="small" style="font-size:11.5px;color:var(--dim2);margin-top:4px">Ollama listens on 11434, LM Studio on 1234. The model list refresh reads what your server has.</div></div>
         <div class="field"><label id="keylabel">API key (stored in this browser only, sent only to your provider)</label>
           <input type="password" id="setkey" autocomplete="off" placeholder="sk-or-...">
           <div class="small" id="keyhint" style="font-size:11.5px;color:var(--dim2);margin-top:4px"></div></div>
@@ -213,9 +229,15 @@
             <select id="setmodel" style="flex:1"></select>
             <button class="btn" id="refreshmodels" title="Reload the provider catalog">↻</button>
           </div>
-          <div class="small" id="modelhint" style="font-size:11.5px;color:var(--dim2);margin-top:4px"></div></div>
+          <div class="small" id="modelhint" style="font-size:11.5px;color:var(--dim2);margin-top:4px"></div>
+          <input id="setmodelcustom" placeholder="or type a model id - e.g. llama3.1:8b" autocomplete="off" spellcheck="false" style="margin-top:6px" hidden></div>
         <div class="field"><label>Personal VM passphrase (optional - encrypts local storage with a key only you hold)</label>
           <input type="password" id="setpass" autocomplete="new-password" placeholder="leave blank to keep storage unencrypted"></div>
+        <div class="field"><label style="display:flex;gap:9px;align-items:center;font-size:13px"><input type="checkbox" id="cloakon" style="width:auto"><span>Privacy cloak - swap private data for synthetic twins before anything leaves this browser</span></label>
+          <div class="small" style="font-size:12px;color:var(--dim);margin-top:6px">When on, every outbound model call - chat, goals, teams, automations, everything - is scrubbed first: emails, phone numbers and card/ID numbers are detected automatically, and anything you teach below is cloaked too. Each real value gets one consistent synthetic twin, so the model still reasons over coherent text. Replies are un-swapped before you see them, so you always read your real data. Twins live only in this browser's store - encrypted when a passphrase is set - and audit logs record counts, never values.</div>
+          <div id="cloakrules" style="margin-top:8px"></div>
+          <div class="trow" style="margin-top:8px"><input id="cloakreal" placeholder="Real value to cloak - e.g. your full name" maxlength="120"><input id="cloaktwin" placeholder="Twin (blank = Muse picks one)" maxlength="120" spellcheck="false"><button class="btn" id="cloakadd">Add</button></div>
+          <div class="small" id="cloakstats" style="font-size:11.5px;color:var(--dim2);margin-top:4px"></div></div>
         <div class="field"><label>Appearance</label>
           <div class="themerow" id="themerow">
             <button class="swatch" data-theme-pick="serious" title="Atelier (default)" style="background:#f2efe7;border-color:#c9c1ac"></button>
@@ -252,6 +274,7 @@
       <div class="lbl">Now</div>
       <div class="kv"><span>Model</span><b id="st-model" title="">-</b></div>
       <div class="kv"><span>Key</span><b id="st-key">none yet</b></div>
+      <div class="kv"><span>Cloak</span><b id="st-cloak">off</b></div>
       <div class="kv"><span>Actions</span><b id="st-actions">0</b></div>
       <div class="kv"><span>Awaiting approval</span><b id="st-pending">0</b></div>
       <div class="kv" id="st-lastrow" hidden><span>Last</span><b id="st-last" title=""></b></div>
@@ -271,7 +294,7 @@
 <!-- modal -->
 <div id="modalwrap"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
-<script src="app.js?v=final-d550a86"></script>
+<script src="app.js?v=cloak-habits-20sep"></script>
 </body>
 </html>
 
