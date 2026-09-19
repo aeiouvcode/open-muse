@@ -69,14 +69,14 @@
     <section class="view" id="view-goals">
       <div class="viewhead"><h2>Goals &amp; plans</h2><span class="sub">Muse turns goals into plans, then advances them step by step. Sensitive steps wait for your approval.</span>
         <span style="flex:1"></span><label class="trow checkrow" style="gap:6px"><input type="checkbox" id="autonomycb"><span class="small" style="font-size:12px;color:var(--dim)">Autonomous</span></label>
-        <button class="btn pri" id="newgoalbtn">+ New goal</button></div>
+        <button class="btn" id="exportmd">Export Markdown</button><button class="btn" id="exportcsv">Export CSV</button><button class="btn pri" id="newgoalbtn">+ New goal</button></div>
       <div class="viewbody">
         <div class="taskbox">
           <div class="trow"><input id="newtask" placeholder="Add a task - Muse tracks it to done..." maxlength="280"><button class="btn" id="addtaskbtn">Add task</button></div>
           <div id="tasklist"></div>
           <div id="remlist"></div>
         </div>
-        <div class="goalgrid" id="goalgrid"></div>
+        <div id="duestrip" class="duestrip" hidden></div><div class="goalgrid" id="goalgrid"></div>
       </div>
     </section>
 
@@ -243,3 +243,4 @@
 <script src="app.js"></script>
 </body>
 </html>
+
