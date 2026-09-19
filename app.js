@@ -555,8 +555,8 @@ const EdgeBridge = {
       addEventListener("message", (e)=>{
         if(e.origin!==EDGE_ORIGIN) return;
         const d=e.data||{};
-        if(d.nonce!==this.nonce && d.edgeai!=="chunk" && d.edgeai!=="done" && d.edgeai!=="error") return;
-        if(d.edgeai==="ready" && d.nonce===this.nonce){ clearTimeout(to); this.models=d.models||[]; resolve(this.models); }
+        if(d.nonce!==this.nonce) return;   // every contract message carries the session nonce
+        if(d.edgeai==="ready"){ clearTimeout(to); this.models=d.models||[]; this.state=d.state||"ready"; this.loadedModel=d.loadedModel||""; resolve(this.models); }
         const p=d.id && this.inflight[d.id];
         if(!p) return;
         if(d.edgeai==="chunk"){ p.onChunk && p.onChunk(String(d.text||"")); }
@@ -582,7 +582,7 @@ const EdgeBridge = {
         reject:e=>{clearTimeout(to);reject(e)},
         onChunk:t=>{ opts.onTok && opts.onTok(t); }
       };
-      this.frame.contentWindow.postMessage({edgeai:"infer", id, nonce:this.nonce, model:opts.model||"", messages, stream:!!opts.stream}, EDGE_ORIGIN);
+      this.frame.contentWindow.postMessage({edgeai:"infer", id, nonce:this.nonce, model:opts.model||this.loadedModel||"", messages, stream:!!opts.stream}, EDGE_ORIGIN);
     });
   }
 };
@@ -593,7 +593,9 @@ function getKey(){ return sessionStorage.getItem("openmuse.key") || (S() && S().
 function friendlyModelError(e){
   const m = String(e && e.message || e);
   if(m==="no-key") return "No model key set. Open Muse is BYO-key: paste a key in Settings (OpenRouter or Token Harbor) - it stays in this browser. Or pick the Local provider and run a model on this machine with no key at all.";
-  if(m==="no-model") return "No model selected. Open Settings and refresh the model list once your local server is up - or just type the model id (e.g. llama3.1:8b).";
+  if(m==="no-model") return provider().edge
+    ? "No on-device model is loaded. Open EDGE//AI (there's a link in Settings), load a chat model there, then come back - Muse never downloads or switches models on its own."
+    : "No model selected. Open Settings and refresh the model list once your local server is up - or just type the model id (e.g. llama3.1:8b).";
   if(m==="edge-timeout") return "The EDGE//AI frame did not come up in 30s - edge-ai may be unreachable right now. Try again, or pick another engine in Settings.";
   if(m==="edge-infer-timeout") return "On-device inference timed out. A first run downloads model weights, which can take a while on slow connections - try again once the EDGE//AI app has the model cached.";
   if(S() && provider().edge && !/^edge-/.test(m)) return "EDGE//AI reported: "+m.slice(0,140);
@@ -616,7 +618,9 @@ async function chatStream(messages, onTok){
   if((prov.local||prov.edge) && !activeModel()) throw new Error("no-model");
   messages = Cloak.out(messages);
   if(prov.edge){
-    const t = await EdgeBridge.infer(messages, {stream:true, model:activeModel(), onTok: acc=>{ onTok && onTok(Cloak.back(acc)); }});
+    const em = activeModel() || EdgeBridge.loadedModel || "";
+    if(!em) throw new Error("no-model");
+    const t = await EdgeBridge.infer(messages, {stream:true, model:em, onTok: acc=>{ onTok && onTok(Cloak.back(acc)); }});
     return Cloak.back(t);
   }
   const headers = { "Content-Type":"application/json" };
@@ -645,7 +649,7 @@ async function chatOnce(messages, json, model){
   if(!key && !prov.local && !prov.edge) throw new Error("no-key");
   if((prov.local||prov.edge) && !(model || activeModel())) throw new Error("no-model");
   messages = Cloak.out(messages);
-  if(prov.edge) return Cloak.back(await EdgeBridge.infer(messages, {model: model || activeModel()}));
+  if(prov.edge){ const em = model || activeModel() || EdgeBridge.loadedModel || ""; if(!em) throw new Error("no-model"); return Cloak.back(await EdgeBridge.infer(messages, {model: em})); }
   const body={ model: model || activeModel(), messages, temperature:0.3 };
   if(json) body.response_format={type:"json_object"};
   const headers = { "Content-Type":"application/json" };
@@ -1315,9 +1319,13 @@ async function populateModelSelect(){
   if(prov.edge){
     $("#setmodelcustom").hidden = false;
     ids = null;
-    try{ const ms = await EdgeBridge.ensure(); ids = ms.map(m=>m.id||m.name).filter(Boolean); }catch(e){ ids = null; }
-    if(ids && ids.length) note = ids.length + " on-device model" + (ids.length===1?"":"s") + " via EDGE//AI - they run in a hidden frame, no key, offline after first download";
-    else { ids = []; note = "EDGE//AI frame not up yet - save with any model id typed below; the first run negotiates and downloads weights"; }
+    try{
+      const ms = await EdgeBridge.ensure();
+      ids = ms.map(m=>m.id||m.name).filter(Boolean);
+      if(EdgeBridge.state==="needs_model") note = "EDGE//AI is up but no model is loaded there - open EDGE//AI and load a chat model first (Muse never downloads or switches models on its own)";
+      else if(ids.length) note = ids.length + " on-device model" + (ids.length===1?"":"s") + " via EDGE//AI" + (EdgeBridge.loadedModel?` - loaded now: ${EdgeBridge.loadedModel}`:"");
+    }catch(e){ ids = null; }
+    if(ids===null){ ids = []; note = "EDGE//AI frame not up yet - the first run brings it up in a hidden frame; models load on the EDGE//AI side"; }
   } else if(prov.local){
     $("#setmodelcustom").hidden = false;
     if(!ids){ ids = []; note = "no local server found at " + (S().settings.localUrl||"http://localhost:11434/v1") + " - start Ollama or LM Studio, press \u21bb, or type the model id below"; }
