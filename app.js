@@ -41,6 +41,8 @@ const Store = {
       mcps: [],           // {id,name,url,key,tools:[{name,desc}]}
       customTools: [],    // {id,name,desc,argsHint,code,sampleArgs,status,eval,created}
       worklog: [],        // {ts,text} - milestone resume doc, newest first
+      agents: [],         // {id,name,prompt,created} - custom workforce specialists
+      automations: [],    // {id,text,cadence,nextRun,lastRun,runs,status,created}
       lastSeen: "",
     };
   },
@@ -183,7 +185,7 @@ function renderStatus(){
   if(TEAM.active && TEAM.agents.length){
     teamBox.hidden = false;
     teamBox.innerHTML = TEAM.agents.map(ag=>
-      `<div class="teamrow"><span class="tic ${ag.status}">${ag.status==="done"?"\u2713":ag.status==="failed"?"\u2715":ag.status==="running"?'<i class="spin"></i>':"\u00b7"}</span><span class="trole">${esc(ag.role)}</span><span class="ttask">${esc(ag.task)}</span></div>`).join("");
+      `<div class="teamrow"><span class="tic ${ag.status}">${ag.status==="done"?"\u2713":ag.status==="failed"?"\u2715":ag.status==="running"?'<i class="spin"></i>':ag.status==="waiting"?"\u25cc":"\u00b7"}</span><span class="trole">${esc(ag.role)}</span><span class="ttask">${esc(ag.task)}${ag.status==="waiting"&&ag.depends?" (after "+ag.depends.join("+")+")":""}</span></div>`).join("");
   } else teamBox.hidden = true;
   $("#st-lastrow").hidden = !RT.last;
   $("#st-last").textContent = RT.last; $("#st-last").title = RT.last;
@@ -335,7 +337,7 @@ function renderGoals(){
       <div class="row">
         <button class="btn pri" data-advance="${g.id}" ${g.status==="done"?"disabled":""}>${g.status==="done"?"Complete":"Advance"}</button>
         <button class="btn" data-tune="${g.id}">Tune</button>
-        <button class="btn" data-team="${g.id}|team">Team</button><button class="btn" data-team="${g.id}|swarm">Swarm</button>
+        <button class="btn" data-team="${g.id}|team">Team</button><button class="btn" data-team="${g.id}|swarm">Swarm</button><button class="btn" data-team="${g.id}|workforce">Workforce</button>
         <button class="btn" data-discuss="${g.id}">Discuss</button><button class="btn badb" data-delgoal="${g.id}">Drop</button>
       </div></div>`;
   }).join("");
@@ -360,7 +362,7 @@ function switchView(name){
   if(name==="settings"){ $("#setprovider").value = S().settings.provider || "openrouter"; $("#setsavekey").checked = !!S().settings.keyStored; $("#setstrip").checked = S().settings.statusStrip !== false; syncProviderUI(); populateModelSelect(); }
   if(name==="evolve") renderEvolutions();
 }
-function renderAll(){ renderGoals(); renderMemory(); renderConnectors(); renderAudit(); renderStatus(); renderChat(); renderEvolutions(); renderTasks(); renderRems(); renderTools(); renderSkills(); renderMcps(); renderStudio(); }
+function renderAll(){ renderGoals(); renderMemory(); renderConnectors(); renderAudit(); renderStatus(); renderChat(); renderEvolutions(); renderTasks(); renderRems(); renderTools(); renderSkills(); renderMcps(); renderStudio(); renderWorkforce(); }
 
 /* ---------------- chat ---------------- */
 function addMsg(role, text, kind){
@@ -833,10 +835,11 @@ async function decideStep(pair, ok){
 /* ---------------- chat flow ---------------- */
 const GOAL_RE = /\b(my goal is|goal:|set a goal|new goal|i want to (?:learn|run|build|write|launch|save|get|become|finish)|help me (?:plan|prepare|get|learn|build|write|launch|email|send|draft|negotiate|make|create|organize|apply))(?=\W|$)/i;
 
-async function sendChat(){
+async function sendChat(auto){
   if(!S()){ showLockScreen("Locked - enter your passphrase to continue."); return; }
-  const ta=$("#chatinput"); const text=ta.value.trim().slice(0,4000); if(!text) return;
-  ta.value=""; ta.style.height="auto";
+  const injected = auto && typeof auto.text==="string";
+  const ta=$("#chatinput"); const text=(injected?auto.text:ta.value).trim().slice(0,4000); if(!text) return;
+  if(!injected){ ta.value=""; ta.style.height="auto"; }
   await addMsg("user", text); renderChat();
 
   // forget command handled locally, instantly
@@ -2048,8 +2051,15 @@ const AgentRoles = {
   reviewer: "You are the REVIEWER on a small agent team. Attack the problem: find errors, risks, missing pieces. Output: prioritized critique with concrete fixes.",
   writer: "You are the WRITER on a small agent team. Turn material into finished prose: simple, direct, warm. Output: the final text itself."
 };
+/* roster lookup: a custom specialist by name, else a built-in role */
+function rolePrompt(role){
+  const custom=(S() && S().agents || []).find(a=>a.name.toLowerCase()===String(role).toLowerCase());
+  if(custom) return "You are "+custom.name.toUpperCase()+" on a small agent workforce. "+custom.prompt+" Stay inside your specialty; output only the artifact.";
+  return AgentRoles[role] || AgentRoles.researcher;
+}
 const TEAM = {active:false, mode:"", goal:"", agents:[]};
 async function runTeam(goalId, mode){
+  if(mode==="workforce") return runWorkforce(goalId);
   const s=S(); const g=s.goals.find(x=>x.id===goalId); if(!g) return;
   if(TEAM.active){ toast("A team is already running - watch the status rail."); return; }
   const ai = AI.provider();
@@ -2117,6 +2127,198 @@ async function runTeam(goalId, mode){
   setRT({state:"idle", step:"", tool:""});
   await Store.save(); renderAll();
 }
+
+/* ---------------- workforce: dependency-graph multi-agent runs ----------------
+   Adapted from Eigent's open-source multi-agent workforce (eigent-ai/eigent,
+   built on CAMEL): a coordinator decomposes the goal into a dependency graph
+   of subtasks, assigns each to a roster specialist (built-in or user-added),
+   runs ready subtasks in parallel waves, hands each agent its dependencies'
+   output, then merges. Rebuilt for this browser - same honest bounds as Team:
+   parallel model calls in this tab, artifacts only, sensitive work still
+   pauses for approval, and nothing runs while the tab is closed. */
+async function runWorkforce(goalId){
+  const s=S(); const g=s.goals.find(x=>x.id===goalId); if(!g) return;
+  if(TEAM.active){ toast("A team is already running - watch the status rail."); return; }
+  const ai = AI.provider();
+  TEAM.active=true; TEAM.mode="workforce"; TEAM.goal=g.title; TEAM.agents=[];
+  setRT({state:"working", step:"Workforce: "+g.title, tool:""});
+  try{
+    const rosterDesc=Object.keys(AgentRoles).map(r=>"- "+r).join("\n")
+      + (s.agents||[]).map(a=>"\n- "+a.name+": "+a.prompt).join("");
+    let tasks;
+    const decomp = await ai.generateText({messages:[
+      {role:"system",content:"You are the coordinator of a small agent workforce. Decompose the goal into 3 to 6 subtasks as a dependency graph. Reply with strict JSON only: {\"tasks\":[{\"id\":\"t1\",\"role\":\"<roster role>\",\"task\":\"<one concrete self-contained subtask>\",\"depends\":[\"<id of an earlier task whose output this subtask needs>\"]}]}. Rules:\n- Assign roles only from this roster:\n"+rosterDesc+"\n- depends lists earlier task ids only (t1 may not depend on t3); a subtask with no dependencies gets [].\n- Independent subtasks must NOT depend on each other, so they run in parallel.\n- Make the final subtask synthesize the deliverable from whatever it needs."},
+      {role:"user",content:g.title+(g.note?"\nSteering: "+g.note:"")}
+    ], json:true});
+    try{
+      tasks=(JSON.parse(decomp).tasks||[]).slice(0,6);
+      if(tasks.length<2) throw 0;
+      tasks.forEach((t,i)=>{
+        t.id="t"+(i+1);
+        t.role=String(t.role||"researcher").slice(0,40);
+        t.task=String(t.task||"").slice(0,300)||("Work on: "+g.title);
+        t.depends=(Array.isArray(t.depends)?t.depends:[]).map(String).filter(d=>/^t\d+$/.test(d) && +d.slice(1)>=1 && +d.slice(1)<=i);
+      });
+    }catch(e){
+      tasks=[{id:"t1",role:"researcher",task:"Research the facts and options for: "+g.title,depends:[]},
+             {id:"t2",role:"coder",task:"Produce the concrete artifact for: "+g.title,depends:["t1"]},
+             {id:"t3",role:"reviewer",task:"Attack the artifact: errors, risks, gaps. Goal: "+g.title,depends:["t2"]}];
+    }
+    TEAM.agents=tasks.map(t=>({role:t.role, task:t.task, depends:t.depends, tid:t.id, status:t.depends.length?"waiting":"queued", output:""}));
+    renderStatus();
+    const byId=id=>TEAM.agents.find(x=>x.tid===id);
+    await audit("workforce", `Workforce started on "${g.title}": `+TEAM.agents.map(t=>t.tid+":"+t.role+(t.depends.length?" after "+t.depends.join("+"):"")).join(", "));
+    await addMsg("sys", `Workforce running on \u201c${g.title}\u201d - ${TEAM.agents.length} subtasks in a dependency graph. Independent waves run in parallel; each agent is handed its dependencies' output. Live roster is in the status rail; artifacts only, nothing external without your approval.`);
+    renderChat();
+    let guard=0;
+    while(TEAM.agents.some(t=>t.status==="queued"||t.status==="waiting") && guard++<12){
+      const ready=TEAM.agents.filter(t=>(t.status==="queued"||t.status==="waiting") && t.depends.every(d=>byId(d) && byId(d).status==="done"));
+      if(!ready.length){
+        for(const t of TEAM.agents.filter(t=>t.status==="queued"||t.status==="waiting")){
+          t.status="failed";
+          t.output=t.depends.some(d=>byId(d) && byId(d).status==="failed") ? "Skipped - a dependency failed." : "Skipped - unresolvable dependencies.";
+        }
+        renderStatus();
+        break;
+      }
+      await Promise.all(ready.map(async t=>{
+        t.status="running"; renderStatus();
+        const depOut=t.depends.map(d=>byId(d)).filter(x=>x && x.status==="done")
+          .map(x=>"["+x.role+" delivered]\n"+x.output.slice(0,2200)).join("\n\n");
+        try{
+          let out=await ai.generateText({messages:[
+            {role:"system",content:rolePrompt(t.role)},
+            {role:"user",content:t.task+(g.note?"\nSteering: "+g.note:"")+(g.due?"\nDue: "+g.due:"")+(depOut?"\n\nWork handed to you by earlier agents:\n"+depOut:"")}
+          ]});
+          if(t.role==="researcher"){
+            const calls=parseToolCalls(out);
+            if(calls.length){
+              const results=[];
+              for(const c of calls.slice(0,3)){ results.push({tool:c.tool, result:await execTool(c.tool, c.args||{})}); }
+              out=await ai.generateText({messages:[
+                {role:"system",content:rolePrompt(t.role)},
+                {role:"user",content:t.task+"\n\nTool results:\n"+results.map(r=>`[${r.tool}]\n${r.result}`).join("\n\n")+"\n\nWrite the final findings from this material."}
+              ]});
+            }
+          }
+          t.output=out; t.status="done";
+        }catch(e){ t.status="failed"; t.output=String(e.message||e).slice(0,200); }
+        renderStatus();
+      }));
+    }
+    const ok=TEAM.agents.filter(x=>x.status==="done");
+    let merged;
+    if(!ok.length){ merged="Every workforce agent failed - check the model key in Settings and try again."; }
+    else{
+      merged=await ai.generateText({messages:[
+        {role:"system",content:"You are the coordinator. Merge your workforce's deliverables into one coherent final answer: keep what survives scrutiny, resolve conflicts, drop what failed. End with one line naming what you merged."},
+        {role:"user",content:`Goal: ${g.title}\n`+ok.map(x=>`[${x.role} - ${x.task}]\n${x.output}`).join("\n\n---\n\n")}
+      ]});
+    }
+    await addMsg("muse", `Workforce merge on \u201c${g.title}\u201d (${ok.length}/${TEAM.agents.length} subtasks delivered):\n\n${merged}`);
+    await audit("workforce", `Workforce finished on "${g.title}" (${ok.length}/${TEAM.agents.length} ok)`);
+    s.counters.actions++;
+    setRT({last:"Workforce finished: "+g.title.slice(0,50)});
+  }catch(e){
+    await addMsg("sys", "Workforce run failed. " + friendlyModelError(e));
+    await audit("error", `Workforce run failed on "${g.title}": ${String(e.message||e).slice(0,120)}`);
+  }
+  TEAM.active=false; TEAM.agents=[];
+  setRT({state:"idle", step:"", tool:""});
+  await Store.save(); renderAll();
+}
+
+/* ---------------- roster + automations (Eigent: custom workforce, scheduled runs) ----------------
+   Roster: user-defined specialists the workforce coordinator can assign.
+   Automations: recurring prompts fired on a schedule while the tab is open.
+   Tab closed = orb asleep - missed runs surface as honest catch-ups, never
+   phantom background runs, and an automation turn is a normal agent turn
+   (sentinel approvals unchanged). */
+const CADENCE_MS={hourly:36e5, daily:864e5, weekly:6048e5};
+function renderWorkforce(){
+  const s=S(); if(!s) return;
+  const ac=$("#agentcount"); if(ac) ac.textContent=(s.agents||[]).length;
+  const rl=$("#rosterlist");
+  if(rl){
+    rl.innerHTML=[
+      ...Object.entries(AgentRoles).map(([r,p])=>({name:r,desc:p.replace(/^You are the \u?\w* ?/,"").slice(0,120),builtin:true})),
+      ...(s.agents||[]).map(a=>({id:a.id,name:a.name,desc:a.prompt,builtin:false}))
+    ].map(a=>`<div class="skill"><span class="txt"><b>${esc(a.name)}${a.builtin?" <span style='color:var(--dim2)'>(built-in)</span>":""}</b><span>${esc(a.desc)}</span></span>${a.builtin?"":`<button class="btn badb" data-agdel="${a.id}" style="padding:3px 9px">×</button>`}</div>`).join("");
+    $$("#rosterlist [data-agdel]").forEach(b=>b.onclick=async()=>{
+      const i=s.agents.findIndex(x=>x.id===b.dataset.agdel);
+      if(i>=0){ await audit("workforce",`Removed roster agent "${s.agents[i].name}"`); s.agents.splice(i,1); await Store.save(); renderWorkforce(); }
+    });
+  }
+  const al=$("#autolist");
+  if(al){
+    const list=s.automations||[];
+    al.innerHTML=list.length?list.map(a=>`<div class="rem"><span>⏱</span><span class="txt">${esc(a.text)}</span><span>${a.cadence} · ${a.status==="active"?"next "+fmtD(a.nextRun):"paused"} · ${a.runs||0} run${(a.runs||0)===1?"":"s"}</span>
+      <button class="btn" data-autotoggle="${a.id}" style="padding:3px 9px">${a.status==="active"?"❚❚":"▶"}</button>
+      <button class="btn badb" data-autodel="${a.id}" style="padding:3px 9px">×</button></div>`).join("")
+      :`<div class="small" style="color:var(--dim2);font-size:12px">No automations yet.</div>`;
+    $$("#autolist [data-autotoggle]").forEach(b=>b.onclick=async()=>{
+      const a=s.automations.find(x=>x.id===b.dataset.autotoggle); if(!a) return;
+      a.status=a.status==="active"?"paused":"active";
+      if(a.status==="active" && new Date(a.nextRun).getTime()<Date.now()) a.nextRun=new Date(Date.now()+CADENCE_MS[a.cadence]).toISOString();
+      await audit("automation",(a.status==="active"?"Resumed: ":"Paused: ")+`"${a.text}"`);
+      await Store.save(); renderWorkforce();
+    });
+    $$("#autolist [data-autodel]").forEach(b=>b.onclick=async()=>{
+      const i=s.automations.findIndex(x=>x.id===b.dataset.autodel);
+      if(i>=0){ await audit("automation",`Removed automation: "${s.automations[i].text}"`); s.automations.splice(i,1); await Store.save(); renderWorkforce(); }
+    });
+  }
+}
+async function checkAutomations(){
+  if(!S()) return;
+  const s=S(); const now=Date.now(); let changed=false;
+  for(const a of (s.automations||[])){
+    if(a.status!=="active" || new Date(a.nextRun).getTime()>now) continue;
+    const overdue=now-new Date(a.nextRun).getTime();
+    a.lastRun=nowISO(); a.runs=(a.runs||0)+1;
+    a.nextRun=new Date(now+CADENCE_MS[a.cadence]).toISOString();
+    changed=true;
+    runAutomation(a, overdue>Math.min(CADENCE_MS[a.cadence], 30*60*1000))
+      .catch(async e=>audit("error","automation run failed: "+String(e).slice(0,120)));
+  }
+  if(changed){ await Store.save(); renderWorkforce(); }
+}
+async function runAutomation(a, late){
+  if(TEAM.active){ await audit("automation",`Deferred "${a.text}" - a team/workforce owns the compute right now`); return; }
+  await audit("automation",`Fired: "${a.text}" (${a.cadence})${late?" - late catch-up":""}`);
+  if(!getKey() || S().settings.autonomy===false){
+    await addMsg("sys", `⏱ Automation due: "${esc(a.text)}" - ${!getKey()?"no model key is set":"autonomy is off"}, so it is parked here instead of running blind. Fix the gate and it fires on its own next cycle.`);
+    await Store.save(); renderChat(); return;
+  }
+  await addMsg("sys", `⏱ Automation firing${late?" (late catch-up - Muse was asleep at the scheduled time; nothing ran while the tab was closed)":""}: "${esc(a.text)}"`);
+  await Store.save(); renderChat();
+  await sendChat({text:a.text, origin:"automation"});
+}
+
+/* workforce view form bindings */
+$("#addagentbtn").addEventListener("click", async()=>{
+  if(!S()) return;
+  const name=$("#newagentname").value.trim().slice(0,40), prompt=$("#newagentprompt").value.trim().slice(0,280);
+  if(!name || !prompt){ toast("Give the agent a name and a specialty."); return; }
+  if(Object.keys(AgentRoles).some(r=>r.toLowerCase()===name.toLowerCase()) || (S().agents||[]).some(a=>a.name.toLowerCase()===name.toLowerCase())){ toast("That name is already on the roster."); return; }
+  S().agents.push({id:uid("ag"), name, prompt, created:nowISO()});
+  $("#newagentname").value=""; $("#newagentprompt").value="";
+  await audit("workforce",`Added roster agent "${name}"`);
+  await Store.save(); renderWorkforce(); toast(name+" joined the roster.");
+});
+$("#newagentprompt").addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); $("#addagentbtn").click(); } });
+$("#addautobtn").addEventListener("click", async()=>{
+  if(!S()) return;
+  const text=$("#newautotext").value.trim().slice(0,280), cadence=$("#newautocad").value;
+  if(!text){ toast("Describe what Muse should do each run."); return; }
+  if(!CADENCE_MS[cadence]) return;
+  S().automations.push({id:uid("au"), text, cadence, status:"active", runs:0, created:nowISO(), nextRun:new Date(Date.now()+CADENCE_MS[cadence]).toISOString(), lastRun:""});
+  $("#newautotext").value="";
+  await audit("automation",`Scheduled (${cadence}): "${text}"`);
+  await Store.save(); renderWorkforce(); toast("Automation scheduled.");
+});
+$("#newautotext").addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); $("#addautobtn").click(); } });
+
 
 /* lock screen shared by boot and idle auto-lock. Sticky: backdrop clicks do
    not dismiss - locked means locked. */
@@ -2207,6 +2409,8 @@ async function finishBoot(){
   setInterval(()=>{ if(S()){ S().lastSeen=nowISO(); Store.save(); } }, 60000);
   await checkReminders();
   setInterval(checkReminders, 20000);
+  await checkAutomations();
+  setInterval(checkAutomations, 30000);
   distillSession();
   $("#vmstate").innerHTML = Store.locked ? '<span class="d"></span>encrypted' : '<span class="d"></span>local';
   const active = S().goals.find(g=>g.status==="active");
