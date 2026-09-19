@@ -19,7 +19,7 @@ const Store = {
   KEY: "openmuse.store.v1",
   default(){
     return {
-      settings: { provider: "openrouter", model: "", hasKey: false, saveKey: false, keyStored: "", mode: "agent", searchProvider: "tavily", searchKey: "", openNetwork: false, skillsOff: [], autonomy: true, theme: "serious", density: "comfortable", font: "m" },
+      settings: { provider: "openrouter", model: "", hasKey: false, saveKey: false, keyStored: "", mode: "agent", searchProvider: "tavily", searchKey: "", openNetwork: false, skillsOff: [], autonomy: true, theme: "serious", density: "comfortable", font: "m", statusStrip: true },
       chat: [],          // {role, text, ts, kind}
       goals: [],         // {id,title,created,plan:{steps:[]},status}
       memory: [],        // {id,text,ts,source}
@@ -202,6 +202,18 @@ function renderStatus(){
   $("#st-pending").classList.toggle("hot", pending>0);
   $("#st-minipending").hidden = pending===0; $("#st-minipending").textContent = pending;
   $("#memcount").textContent = s.memory.length;
+  const strip = $("#mstrip");
+  if(strip){
+    strip.hidden = s.settings.statusStrip === false;
+    if(!strip.hidden){
+      const queued = s.goals.flatMap(g=>g.plan.steps.filter(x=>x.status!=="done")).length;
+      $("#ms-text").textContent = busy
+        ? "Working: " + (RT.step || "Working") + (RT.tool ? " · " + RT.tool : "")
+        : (queued ? `Idle · ${queued} in queue` : "Idle");
+      $("#ms-pending").hidden = pending===0; $("#ms-pending").textContent = pending;
+      $("#ms-pending").title = pending + " awaiting approval";
+    }
+  }
   const q = $("#queue");
   const items = s.goals.flatMap(g=>g.plan.steps.filter(x=>x.status!=="done").map(x=>({g,x})));
   q.innerHTML = items.length ? items.slice(0,8).map(({g,x}) =>
@@ -309,7 +321,7 @@ function renderGoals(){
 function switchView(name){
   $$(".navbtn").forEach(x=>x.classList.toggle("on", x.dataset.view===name));
   $$(".view").forEach(v=>v.classList.toggle("on", v.id==="view-"+name));
-  if(name==="settings"){ $("#setprovider").value = S().settings.provider || "openrouter"; $("#setsavekey").checked = !!S().settings.keyStored; syncProviderUI(); populateModelSelect(); }
+  if(name==="settings"){ $("#setprovider").value = S().settings.provider || "openrouter"; $("#setsavekey").checked = !!S().settings.keyStored; $("#setstrip").checked = S().settings.statusStrip !== false; syncProviderUI(); populateModelSelect(); }
   if(name==="evolve") renderEvolutions();
 }
 function renderAll(){ renderGoals(); renderMemory(); renderConnectors(); renderAudit(); renderStatus(); renderChat(); renderEvolutions(); renderTasks(); renderRems(); renderTools(); renderSkills(); renderMcps(); renderStudio(); }
@@ -1096,6 +1108,9 @@ $("#savesettings").addEventListener("click", async ()=>{
   await audit("settings","Settings updated");
   toast("Saved.");
 });
+$("#ms-close").addEventListener("click", async ()=>{ S().settings.statusStrip=false; await Store.save(); renderStatus(); toast("Status strip hidden - turn it back on in Settings."); });
+$("#setstrip").addEventListener("change", async ()=>{ S().settings.statusStrip = $("#setstrip").checked; await Store.save(); renderStatus(); });
+$("#locknowbtn").addEventListener("click", manualLock);
 $("#exportbtn").addEventListener("click", async ()=>{
   if(Store.locked && Store.passKey){
     // E2EE export: same AES-GCM envelope as the at-rest store; only your passphrase opens it
@@ -1198,6 +1213,29 @@ ${listing}`;
    cannot rewrite itself, so approval yields a patch bundle download or a
    structured hand-off to Instinct. Failed attempts stay logged. */
 const EVOLVE_ENGINE = "deepseek-v4.1-flash:free";   // Token Harbor :free route - the loop engine
+/* Self-knowledge: what Open Muse ALREADY does. The evolve engine only ever saw
+   a one-line app description, so it kept proposing features that exist (it once
+   proposed theme selection with themes already shipped). Keep this list current
+   whenever a capability ships - it is injected into every draft prompt. */
+const APP_CAPABILITIES = [
+  "Three modes: Agent (tools + goals), Chat (plain talk, tools stay silent), Coder (code/diffs, self-tests, diff-to-proposal)",
+  "Goals: natural-language goal capture, model-generated plans with steps, autonomous step execution with auto-advance, human steps paused by Sentinel, Complete/Team/Swarm/Discuss/Drop actions",
+  "Team mode: model-decomposed 2-4 role agents (researcher/coder/reviewer/writer) run in parallel with a live roster, then a merge pass",
+  "Swarm mode: three fixed angles (research/design/red-team) on one goal, then merge",
+  "Studio: Muse-built mini-apps stored in the VM, run in a sandboxed iframe (connect-src none), downloadable",
+  "Memory: Mem0-style auto-learned facts with update-in-place, pinning, expiry, provenance and use counts; pinned facts ride every prompt",
+  "Audit trail + worklog: full event stream with a resume card",
+  "Tasks and reminders with due-time firing",
+  "Tools: calc, web search, fetch page, remember, reminders, Monid trio (honestly CORS-badged), plus user-built custom tools, skills, and MCP connector entries",
+  "Connectors permission model (email/cal/files/web/pay scopes gating plans)",
+  "Approvals: Sentinel pauses sensitive steps; approval cards persist resolved state across reloads",
+  "Personal VM: local IndexedDB store, optional AES-GCM at rest with PBKDF2 passphrase, 15-minute idle auto-lock, manual Lock now, encrypted export/import, full wipe",
+  "Appearance: four themes (serious/violet/ember/paper), density, font size - user-selectable in Settings",
+  "Model providers: OpenRouter and Token Harbor, live catalog with free-model listing, key in session or encrypted on device",
+  "Evolve itself: proposal drafting, hard gates (storage + encryption roundtrip, key configured, schema, size, app-file targets, secret scan, external-call allowlist), approve/reject with persistence, patch-bundle export, handoff to Instinct",
+  "Mobile layout: hamburger nav, safe-area composer, dismissible status strip showing working state and queue",
+  "Proactivity: stale-step follow-ups and suggestions surfaced in chat"
+];
 const EVOLVE_HOSTS = ["openrouter.ai","tokenharbor.ai"];
 const EVO_SECRET_RES = [ /thk_live_[A-Za-z0-9]{6,}/, /sk-or-[A-Za-z0-9._-]{6,}/, /\bsk-[A-Za-z0-9]{20,}/, /gh[pousr]_[A-Za-z0-9]{20,}/, /github_pat_[A-Za-z0-9_]{20,}/, /BEGIN [A-Z ]*PRIVATE KEY/, /(?:password|passwd|api[_-]?key|secret)\s*[:=]\s*["'][^"'\s]{8,}/i ];
 
@@ -1263,6 +1301,9 @@ async function draftEvolution(ask){
     const engine = S().settings.provider==="tokenharbor" ? EVOLVE_ENGINE : activeModel();
     const raw = await chatOnce([
       {role:"system",content:`You are the self-improvement engine of Open Muse - an open-source, local-first personal agent web app, three static files: index.html (UI shell), styles.css (dark refined theme), app.js (all logic: local store with optional AES-GCM encryption, chat, goals/plans, memory, audit trail, permissions model, model providers OpenRouter + Token Harbor, coder mode, this evolve module).
+Open Muse ALREADY HAS these capabilities - never propose any of them, a rename/restyle of them, or a near-duplicate:
+${APP_CAPABILITIES.map(c=>"- "+c).join("\n")}
+If the user's ask is already covered by the list, do NOT draft a proposal for it; instead title the proposal "Already shipped: <capability>" and use the rationale to point at the existing feature.
 Propose ONE concrete, high-value improvement as strict JSON: {"title":"...","rationale":"...","changes":[{"file":"app.js","description":"...","patch":"unified diff or replacement snippet"}],"testPlan":["..."]}.
 Hard rules: original code only; patches small and self-contained; no external services beyond openrouter.ai and tokenharbor.ai; never include API keys or secrets; files limited to index.html, app.js, styles.css, README.md.`},
       {role:"user",content: ask || "Look at the app description and propose the single highest-value improvement."}
@@ -2053,7 +2094,7 @@ function showLockScreen(reason){
       await Store.unlock($("#unlockpass").value);
       delete $("#modalwrap").dataset.sticky;
       closeModal();
-      if(wasIdleLock){ renderAll(); await audit("lock","Unlocked after idle auto-lock"); }
+      if(wasIdleLock){ renderAll(); await audit("lock","Unlocked after lock"); }
       armIdleLock();
       if(!window.__booted){ window.__booted=true; finishBoot(); }
     }
@@ -2074,11 +2115,17 @@ function armIdleLock(){
   if(!(Store.locked && Store.passKey)) return;
   idleTimer=setTimeout(sessionLock, IDLE_LOCK_MS);
 }
-function sessionLock(){
+function sessionLock(){ doLock("Locked after 15 idle minutes. Your data is ciphertext again - enter your passphrase to continue."); }
+async function manualLock(){
+  if(!(Store.locked && Store.passKey)){ toast("Nothing to lock - set a Personal VM passphrase first and the store encrypts."); return; }
+  await audit("lock","Manual lock from Settings");
+  doLock("Locked manually. Your data is ciphertext again - enter your passphrase to continue.");
+}
+function doLock(reason){
   if(!(Store.locked && Store.passKey)) return;
   Store.passKey=null; Store.raw=null;
   clearTimeout(idleTimer);
-  showLockScreen("Locked after 15 idle minutes. Your data is ciphertext again - enter your passphrase to continue.");
+  showLockScreen(reason);
 }
 ["pointerdown","keydown","touchstart"].forEach(ev=>addEventListener(ev, armIdleLock, {passive:true}));
 
