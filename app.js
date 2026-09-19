@@ -110,6 +110,8 @@ const PROVIDERS = {
                  fallback:["deepseek-v4.1-flash:free","mimo-v2.5:free","muse-spark-3","kimi-k3","glm-5.3","gemini-3.8-flash"] },
   local:       { name:"Local model",  local:true, defModel:"", keyPh:"no key needed", hint:"runs entirely on your machine - Ollama (ollama serve) or LM Studio's local server. No key, no cloud: prompts never leave this device.",
                  fallback:[] },
+  edge:        { name:"On-device (EDGE//AI)", edge:true, defModel:"", keyPh:"no key needed", hint:"the EDGE//AI app runs the model in a hidden frame on this device - first use downloads model weights (Hugging Face), after that it works offline. No key, no cloud.",
+                 fallback:[] },
 };
 const provider = () => PROVIDERS[S().settings.provider] || PROVIDERS.openrouter;
 const activeModel = () => S().settings.model || provider().defModel;
@@ -530,6 +532,61 @@ function renderCloak(){
     : `Cloak is off - prompts go to your provider exactly as written.${tot?` ${tot} values were cloaked before it was turned off.`:""}`;
 }
 
+/* ---------------- EDGE//AI bridge: on-device inference via the sibling app ----------------
+   Open Muse and EDGE//AI are both static sites on aeiouvcode.github.io (same
+   origin). With the "On-device (EDGE//AI)" provider, Muse mounts EDGE//AI in a
+   hidden frame and runs inference there over postMessage RPC: the model lives
+   on this device, no key, no cloud. The cloak still applies to every prompt.
+   Contract (mirrored in edge-bridge-contract.html and shared with the EDGE//AI build):
+     frame URL:  /edge-ai/?bridge=openmuse&nonce=<random>
+     edge->muse: {edgeai:"ready", nonce, models:[{id,name,params}]}
+     muse->edge: {edgeai:"infer", id, nonce, model, messages:[{role,content}], stream}
+     edge->muse: {edgeai:"chunk", id, text}* then {edgeai:"done", id, text} | {edgeai:"error", id, message}
+   Both sides check event.origin and the nonce. */
+const EDGE_ORIGIN = "https://aeiouvcode.github.io";
+const EDGE_URL = EDGE_ORIGIN + "/edge-ai/";
+const EdgeBridge = {
+  frame:null, nonce:"", ready:null, models:[], inflight:{},
+  ensure(){
+    if(this.ready) return this.ready;
+    this.nonce = Math.random().toString(36).slice(2)+Date.now().toString(36);
+    this.ready = new Promise((resolve,reject)=>{
+      const to=setTimeout(()=>reject(new Error("edge-timeout")), 30000);
+      addEventListener("message", (e)=>{
+        if(e.origin!==EDGE_ORIGIN) return;
+        const d=e.data||{};
+        if(d.nonce!==this.nonce && d.edgeai!=="chunk" && d.edgeai!=="done" && d.edgeai!=="error") return;
+        if(d.edgeai==="ready" && d.nonce===this.nonce){ clearTimeout(to); this.models=d.models||[]; resolve(this.models); }
+        const p=d.id && this.inflight[d.id];
+        if(!p) return;
+        if(d.edgeai==="chunk"){ p.onChunk && p.onChunk(String(d.text||"")); }
+        if(d.edgeai==="done"){ delete this.inflight[d.id]; p.resolve(String(d.text||"")); }
+        if(d.edgeai==="error"){ delete this.inflight[d.id]; p.reject(new Error(String(d.message||"edge-error"))); }
+      });
+      const f=document.createElement("iframe");
+      f.style.display="none"; f.setAttribute("aria-hidden","true"); f.tabIndex=-1;
+      f.src=(window.__EDGE_URL_OVERRIDE||EDGE_URL)+"?bridge=openmuse&nonce="+this.nonce;
+      document.body.appendChild(f);
+      this.frame=f;
+    });
+    this.ready.catch(()=>{ this.ready=null; });   // a timeout stays retryable
+    return this.ready;
+  },
+  async infer(messages, opts={}){
+    await this.ensure();
+    const id=uid("ei");
+    return new Promise((resolve,reject)=>{
+      const to=setTimeout(()=>{ delete this.inflight[id]; reject(new Error("edge-infer-timeout")); }, 10*60*1000);  // first run downloads weights
+      this.inflight[id]={
+        resolve:t=>{clearTimeout(to);resolve(t)},
+        reject:e=>{clearTimeout(to);reject(e)},
+        onChunk:t=>{ opts.onTok && opts.onTok(t); }
+      };
+      this.frame.contentWindow.postMessage({edgeai:"infer", id, nonce:this.nonce, model:opts.model||"", messages, stream:!!opts.stream}, EDGE_ORIGIN);
+    });
+  }
+};
+
 /* ---------------- model ---------------- */
 function getKey(){ return sessionStorage.getItem("openmuse.key") || (S() && S().settings.keyStored) || ""; }
 /* human-readable model errors: never show raw provider JSON in chat */
@@ -537,6 +594,9 @@ function friendlyModelError(e){
   const m = String(e && e.message || e);
   if(m==="no-key") return "No model key set. Open Muse is BYO-key: paste a key in Settings (OpenRouter or Token Harbor) - it stays in this browser. Or pick the Local provider and run a model on this machine with no key at all.";
   if(m==="no-model") return "No model selected. Open Settings and refresh the model list once your local server is up - or just type the model id (e.g. llama3.1:8b).";
+  if(m==="edge-timeout") return "The EDGE//AI frame did not come up in 30s - edge-ai may be unreachable right now. Try again, or pick another engine in Settings.";
+  if(m==="edge-infer-timeout") return "On-device inference timed out. A first run downloads model weights, which can take a while on slow connections - try again once the EDGE//AI app has the model cached.";
+  if(S() && provider().edge && !/^edge-/.test(m)) return "EDGE//AI reported: "+m.slice(0,140);
   if(S() && provider().local && /failed to fetch|networkerror|load failed/i.test(m)) return "Could not reach the local model server at " + (S().settings.localUrl||"http://localhost:11434/v1") + ". Start Ollama (ollama serve) or LM Studio's server there, then try again. Nothing left this device.";
   const st = m.match(/\bmodel (\d{3})\b/) || m.match(/\b(401|402|403|404|408|409|429|5\d\d)\b/);
   const code = st ? st[1] : "";
@@ -552,9 +612,13 @@ function friendlyModelError(e){
 
 async function chatStream(messages, onTok){
   const key=getKey(); const prov=provider(); const ep=provEndpoints();
-  if(!key && !prov.local) throw new Error("no-key");
-  if(prov.local && !activeModel()) throw new Error("no-model");
+  if(!key && !prov.local && !prov.edge) throw new Error("no-key");
+  if((prov.local||prov.edge) && !activeModel()) throw new Error("no-model");
   messages = Cloak.out(messages);
+  if(prov.edge){
+    const t = await EdgeBridge.infer(messages, {stream:true, model:activeModel(), onTok: acc=>{ onTok && onTok(Cloak.back(acc)); }});
+    return Cloak.back(t);
+  }
   const headers = { "Content-Type":"application/json" };
   if(key) headers["Authorization"] = "Bearer " + key;
   const r = await fetch(ep.url, {
@@ -578,9 +642,10 @@ async function chatStream(messages, onTok){
 }
 async function chatOnce(messages, json, model){
   const key=getKey(); const prov=provider(); const ep=provEndpoints();
-  if(!key && !prov.local) throw new Error("no-key");
-  if(prov.local && !(model || activeModel())) throw new Error("no-model");
+  if(!key && !prov.local && !prov.edge) throw new Error("no-key");
+  if((prov.local||prov.edge) && !(model || activeModel())) throw new Error("no-model");
   messages = Cloak.out(messages);
+  if(prov.edge) return Cloak.back(await EdgeBridge.infer(messages, {model: model || activeModel()}));
   const body={ model: model || activeModel(), messages, temperature:0.3 };
   if(json) body.response_format={type:"json_object"};
   const headers = { "Content-Type":"application/json" };
@@ -1247,7 +1312,13 @@ async function populateModelSelect(){
   sel.innerHTML = `<option value="">loading catalog...</option>`;
   let ids = await fetchCatalog(pv);
   let note = "";
-  if(prov.local){
+  if(prov.edge){
+    $("#setmodelcustom").hidden = false;
+    ids = null;
+    try{ const ms = await EdgeBridge.ensure(); ids = ms.map(m=>m.id||m.name).filter(Boolean); }catch(e){ ids = null; }
+    if(ids && ids.length) note = ids.length + " on-device model" + (ids.length===1?"":"s") + " via EDGE//AI - they run in a hidden frame, no key, offline after first download";
+    else { ids = []; note = "EDGE//AI frame not up yet - save with any model id typed below; the first run negotiates and downloads weights"; }
+  } else if(prov.local){
     $("#setmodelcustom").hidden = false;
     if(!ids){ ids = []; note = "no local server found at " + (S().settings.localUrl||"http://localhost:11434/v1") + " - start Ollama or LM Studio, press \u21bb, or type the model id below"; }
     else note = ids.length + " model" + (ids.length===1?"":"s") + " served locally - prompts never leave this device";
@@ -1272,12 +1343,12 @@ function syncProviderUI(){
   const prov = PROVIDERS[pv] || PROVIDERS.openrouter;
   $("#setkey").placeholder = prov.keyPh;
   $("#keyhint").textContent = prov.hint;
-  const isLocal = !!prov.local;
+  const isLocal = !!prov.local, keyless = isLocal || !!prov.edge;
   $("#localurlwrap").hidden = !isLocal;
-  $("#setkey").disabled = isLocal;
-  $("#setsavekey").disabled = isLocal;
-  $("#keylabel").textContent = isLocal
-    ? "No API key - a local model runs on this machine and prompts never leave it"
+  $("#setkey").disabled = keyless;
+  $("#setsavekey").disabled = keyless;
+  $("#keylabel").textContent = keyless
+    ? (prov.edge ? "No API key - EDGE//AI runs the model on this device" : "No API key - a local model runs on this machine and prompts never leave it")
     : "API key (stored in this browser only, sent only to your provider)";
   if(isLocal) $("#setlocalurl").value = S().settings.localUrl || "http://localhost:11434/v1";
 }
@@ -1529,6 +1600,7 @@ const APP_CAPABILITIES = [
   "Appearance: four themes (serious/violet/ember/paper), density, font size - user-selectable in Settings",
   "Model providers: OpenRouter, Token Harbor (live catalog with free-model listing, key in session or encrypted on device), and Local - Ollama/LM Studio over a user-set localhost OpenAI-compatible endpoint, no key, prompts never leave the device",
   "Privacy cloak: optional AgentCloak-style layer - before any outbound model call, structured PII (emails, phones, card/ID numbers) is auto-detected and user-taught values are swapped for consistent synthetic twins; replies are un-swapped before display; twins stored locally/encrypted, audit logs counts only",
+  "On-device engine: EDGE//AI bridge - sibling static app (same origin) runs inference in a hidden frame over postMessage RPC, no key, offline after model download",
   "Habits: daily/weekly habits with check-ins and honest streaks (a missed period resets the count, no freebies), due pill in nav, evening proactive nudge, ISO-week buckets for weekly habits",
   "Evolve itself: proposal drafting, hard gates (storage + encryption roundtrip, key configured, schema, size, app-file targets, secret scan, external-call allowlist), approve/reject with persistence, patch-bundle export, handoff to Instinct",
   "Mobile layout: hamburger nav, safe-area composer, dismissible status strip showing working state and queue",
