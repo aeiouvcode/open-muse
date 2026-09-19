@@ -50,25 +50,27 @@
   const nonce=q.get("nonce")||"";
   const PARENT="https://aeiouvcode.github.io";
   document.getElementById("stubstate").textContent="Stub mode ACTIVE - speaking the bridge contract with an echo backend.";
-  const models=[{id:"stub-echo-1",name:"Stub Echo 1M",params:"1M"}];
+  const models=[{id:"stub-echo-1",name:"Stub Echo 1M",params:"1M",fit:"any",loaded:true}];
+  const loadedModel="stub-echo-1";
   function say(d){ if(window.parent&&window.parent!==window) window.parent.postMessage(d, PARENT); }
   addEventListener("message", function(e){
     if(e.origin!==PARENT) return;
     const d=e.data||{};
     if(d.edgeai!=="infer"||d.nonce!==nonce) return;
+    if(d.model && d.model!==loadedModel){ say({edgeai:"error", id:d.id, nonce, code:"wrong_model", message:"EDGE//AI runs only the model you loaded there ("+loadedModel+"). Load "+d.model+" in EDGE//AI first, or let Muse use the loaded one."}); return; }
     const last=(d.messages||[]).filter(m=>m.role==="user").pop();
     const text="EDGE-STUB echo ("+(d.model||"stub-echo-1")+"): "+(last?last.content:"(empty)");
     if(d.stream){
       const words=text.split(" ");
       let acc=""; let i=0;
-      const tick=()=>{ acc+=(i?" ":"")+words[i]; say({edgeai:"chunk", id:d.id, text:acc}); i++;
-        if(i<words.length) setTimeout(tick, 30); else say({edgeai:"done", id:d.id, text:acc}); };
+      const tick=()=>{ acc+=(i?" ":"")+words[i]; say({edgeai:"chunk", id:d.id, nonce, text:acc}); i++;
+        if(i<words.length) setTimeout(tick, 30); else say({edgeai:"done", id:d.id, nonce, text:acc, metrics:{stub:true}}); };
       tick();
     } else {
-      say({edgeai:"done", id:d.id, text});
+      say({edgeai:"done", id:d.id, nonce, text, metrics:{stub:true}});
     }
   });
-  say({edgeai:"ready", nonce, models});
+  say({edgeai:"ready", version:1, nonce, state:"ready", loadedModel, models});
 })();
 </script>
 </body>
