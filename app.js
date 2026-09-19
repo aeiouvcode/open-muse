@@ -594,7 +594,7 @@ function friendlyModelError(e){
   const m = String(e && e.message || e);
   if(m==="no-key") return "No model key set. Open Muse is BYO-key: paste a key in Settings (OpenRouter or Token Harbor) - it stays in this browser. Or pick the Local provider and run a model on this machine with no key at all.";
   if(m==="no-model") return provider().edge
-    ? "No on-device model is loaded. Open EDGE//AI (there's a link in Settings), load a chat model there, then come back - Muse never downloads or switches models on its own."
+    ? "No on-device model is loaded. Open EDGE//AI (aeiouvcode.github.io/edge-ai), load a chat model there, then come back - Muse never downloads or switches models on its own."
     : "No model selected. Open Settings and refresh the model list once your local server is up - or just type the model id (e.g. llama3.1:8b).";
   if(m==="edge-timeout") return "The EDGE//AI frame did not come up in 30s - edge-ai may be unreachable right now. Try again, or pick another engine in Settings.";
   if(m==="edge-infer-timeout") return "On-device inference timed out. A first run downloads model weights, which can take a while on slow connections - try again once the EDGE//AI app has the model cached.";
@@ -615,7 +615,7 @@ function friendlyModelError(e){
 async function chatStream(messages, onTok){
   const key=getKey(); const prov=provider(); const ep=provEndpoints();
   if(!key && !prov.local && !prov.edge) throw new Error("no-key");
-  if((prov.local||prov.edge) && !activeModel()) throw new Error("no-model");
+  if(prov.local && !activeModel()) throw new Error("no-model");
   messages = Cloak.out(messages);
   if(prov.edge){
     const em = activeModel() || EdgeBridge.loadedModel || "";
@@ -647,7 +647,7 @@ async function chatStream(messages, onTok){
 async function chatOnce(messages, json, model){
   const key=getKey(); const prov=provider(); const ep=provEndpoints();
   if(!key && !prov.local && !prov.edge) throw new Error("no-key");
-  if((prov.local||prov.edge) && !(model || activeModel())) throw new Error("no-model");
+  if(prov.local && !(model || activeModel())) throw new Error("no-model");
   messages = Cloak.out(messages);
   if(prov.edge){ const em = model || activeModel() || EdgeBridge.loadedModel || ""; if(!em) throw new Error("no-model"); return Cloak.back(await EdgeBridge.infer(messages, {model: em})); }
   const body={ model: model || activeModel(), messages, temperature:0.3 };
