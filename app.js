@@ -41,6 +41,7 @@ const Store = {
       mcps: [],           // {id,name,url,key,tools:[{name,desc}]}
       customTools: [],    // {id,name,desc,argsHint,code,sampleArgs,status,eval,created}
       worklog: [],        // {ts,text} - milestone resume doc, newest first
+      coder: { planMode:false, activeSession:"main", sessions:[{id:"main",name:"Main",created:new Date().toISOString(),updated:new Date().toISOString(),chat:[],checkpoint:""}], archives:[], lastCheckpoint:"" },
       agents: [],         // {id,name,prompt,created} - custom workforce specialists
       automations: [],    // {id,text,cadence,nextRun,lastRun,runs,status,created}
       lastSeen: "",
@@ -362,7 +363,7 @@ function switchView(name){
   if(name==="settings"){ $("#setprovider").value = S().settings.provider || "openrouter"; $("#setsavekey").checked = !!S().settings.keyStored; $("#setstrip").checked = S().settings.statusStrip !== false; syncProviderUI(); populateModelSelect(); }
   if(name==="evolve") renderEvolutions();
 }
-function renderAll(){ renderGoals(); renderMemory(); renderConnectors(); renderAudit(); renderStatus(); renderChat(); renderEvolutions(); renderTasks(); renderRems(); renderTools(); renderSkills(); renderMcps(); renderStudio(); renderWorkforce(); }
+function renderAll(){ renderGoals(); renderMemory(); renderConnectors(); renderAudit(); renderStatus(); renderChat(); renderCoderWorkbench(); renderEvolutions(); renderTasks(); renderRems(); renderTools(); renderSkills(); renderMcps(); renderStudio(); renderWorkforce(); }
 
 /* ---------------- chat ---------------- */
 function addMsg(role, text, kind){
@@ -377,7 +378,7 @@ function renderChat(){
   log.innerHTML = s.chat.map(m => {
     if(m.kind==="card") return m.text;   // pre-rendered card html (approval/suggestion cards render live below)
     if(m.kind==="tool"){ const [t,r]=m.text.split("|||"); return `<div class="toolcard"><b>⚙ ${esc(t)}</b><div class="res">${esc(r)}</div></div>`; }
-    const cls = m.role==="user" ? "user" : m.role==="sys" ? "sys" : "muse";
+    const cls = (m.role==="user" ? "user" : m.role==="sys" ? "sys" : "muse") + (m.kind==="checkpoint" ? " checkpoint" : "");
     const body = m.role==="muse" ? mdLite(m.text) : esc(m.text);
     return `<div class="msg ${cls}"><div class="body">${body}</div><div class="meta">${fmtT(m.ts)}</div></div>`;
   }).join("");
@@ -940,7 +941,9 @@ async function sendChat(auto){
     renderChat();
   }
   setPresence("idle");
-  await Store.save(); renderStatus();
+  await Store.save();
+  if(mode()==="coder") { await saveCoderSession(); const q=coderContext(); if(q.pct>88 && S().chat.length>18) await createCoderCheckpoint(true); }
+  renderStatus(); renderCoderWorkbench();
 }
 
 /* memory extraction: small background call, durable facts only */
@@ -1210,6 +1213,7 @@ function applyModeUI(){
     ? "Plain chat - just talk; Muse still remembers quietly"
     : "Personal agent";
   const mob = matchMedia("(max-width:820px)").matches;
+  renderCoderWorkbench();
   $("#chatinput").placeholder = m==="coder"
     ? (mob ? "Ask Muse to change its code..." : "Ask Muse to change its own code...  (diffs go through Evolve gates + your approval)")
     : m==="chat"
@@ -1237,6 +1241,7 @@ function coderPrompt(src){
   const listing = Object.entries(src).map(([f,c])=>`--- ${f} (${c.length} chars) ---\n${c}`).join("\n\n");
   return `You are Muse in CODER MODE - a coding agent working on Open Muse's own source, an open-source local-first personal agent web app. The full current source is included below.
 How you work:
+${S().coder&&S().coder.planMode ? "- PLAN MODE IS ON. Inspect and reason only. Do not emit tool calls or a patch. Return a numbered implementation plan, risks, and verification steps; wait for the user to turn Plan mode off before producing changes." : "- Execution mode is on. Work from evidence and produce a concrete change."}
 - Plan in code steps: say what you will change and why, then produce the change.
 - Code goes in fenced blocks with the language (\`\`\`js, \`\`\`html, \`\`\`css). When editing existing code, produce a unified diff in a \`\`\`diff block (+ / - / @@ lines) against the source below.
 - Review your own diff before finishing: one short paragraph on risks and what to test. Suggest the Self-tests button after any change.
@@ -1247,6 +1252,64 @@ Style: clipped, precise, engineer-to-engineer. Short prose; the code does the ta
 CURRENT APP SOURCE:
 ${listing}`;
 }
+
+/* ---------------- Coder workspace: MiniMax Code patterns ----------------
+   Adapted, not copied: resumable sessions, explicit Plan mode, context
+   pressure, durable checkpoints and bounded compaction. Everything stays in
+   the same encrypted Store as the rest of Open Muse. */
+function coderState(){
+  if(!S().coder) S().coder={planMode:false,activeSession:"main",sessions:[],archives:[],lastCheckpoint:""};
+  if(!S().coder.sessions.length) S().coder.sessions=[{id:"main",name:"Main",created:nowISO(),updated:nowISO(),chat:[],checkpoint:""}];
+  return S().coder;
+}
+function activeCoderSession(){ const c=coderState(); return c.sessions.find(x=>x.id===c.activeSession)||c.sessions[0]; }
+function coderContext(){
+  const chars=S().chat.filter(m=>!m.kind||m.kind==="checkpoint").reduce((n,m)=>n+String(m.text||"").length,0);
+  const estimated=Math.ceil(chars/4)+12500; // own source is injected in Coder mode
+  const limit=32768, pct=Math.min(100,Math.round(estimated/limit*100));
+  return {estimated,limit,pct,label:pct>84?"compact now":pct>66?"getting full":pct>40?"in use":"fresh"};
+}
+function checkpointText(){
+  const recent=S().chat.filter(m=>!m.kind||m.kind==="checkpoint").slice(-10);
+  const asks=recent.filter(m=>m.role==="user").slice(-3).map(m=>String(m.text).replace(/\s+/g," ").slice(0,120));
+  const replies=recent.filter(m=>m.role==="muse").slice(-2).map(m=>String(m.text).replace(/```[\s\S]*?```/g,"[code]").replace(/\s+/g," ").slice(0,150));
+  const diff=lastDiff();
+  return [asks.length?"Recent asks: "+asks.join(" / "):"No recent ask",replies.length?"Muse: "+replies.join(" / "):"No answer yet",diff?"A draft diff is present and still needs review/testing.":"No draft diff in the recent transcript."].join(" ");
+}
+async function saveCoderSession(){
+  const x=activeCoderSession(); if(!x)return; x.chat=JSON.parse(JSON.stringify(S().chat)); x.updated=nowISO(); await Store.save();
+}
+function renderCoderWorkbench(){
+  const bench=$("#coderbench"); if(!bench||!S())return;
+  const coder=mode()==="coder"; bench.hidden=!coder;
+  const c=coderState(), x=activeCoderSession(), q=coderContext();
+  $("#coderplan").classList.toggle("on",!!c.planMode); $("#coderplan").setAttribute("aria-pressed",String(!!c.planMode));
+  $("#coderplan small").textContent=c.planMode?"inspect only; execution paused":"inspect first, then execute";
+  $("#codersessionname").textContent=x?x.name:"Main";
+  $("#codercontextbar").style.width=q.pct+"%"; $("#codercontexttext").textContent=q.pct+"%"; $("#codercontextnote").textContent=q.label;
+  $("#coderresume").textContent=(x&&x.checkpoint)||c.lastCheckpoint||"No checkpoint yet. Muse will preserve decisions, changed files and next steps locally.";
+}
+async function createCoderCheckpoint(quiet){
+  const c=coderState(), x=activeCoderSession(), text=checkpointText(); x.checkpoint=text; c.lastCheckpoint=text; x.updated=nowISO();
+  if(!quiet) await addMsg("sys","Checkpoint saved locally. "+text,"checkpoint");
+  await saveCoderSession(); renderChat(); renderCoderWorkbench(); if(!quiet) toast("Coder checkpoint saved.");
+}
+async function compactCoderContext(){
+  const c=coderState(), x=activeCoderSession(); if(S().chat.length<=14){ toast("Context is already lean."); return; }
+  const old=S().chat.slice(0,-12), keep=S().chat.slice(-12), summary=checkpointText();
+  c.archives.unshift({id:uid("arc"),sessionId:x.id,ts:nowISO(),messages:old,summary}); if(c.archives.length>12)c.archives.length=12;
+  S().chat=[{role:"sys",text:"Earlier work compacted into an encrypted local checkpoint. "+summary,ts:nowISO(),kind:"checkpoint"},...keep];
+  x.checkpoint=summary; c.lastCheckpoint=summary; await saveCoderSession(); renderChat(); renderCoderWorkbench(); await audit("coder",`Compacted ${old.length} messages into a local checkpoint`); toast("Older context compacted; full copy kept locally.");
+}
+function openCoderSessions(){
+  const c=coderState(); openModal(`<h3>Coder sessions</h3><div class="sub">Resume a focused coding thread. Sessions and archived context stay inside your encrypted local store.</div><div class="sessionlist">${c.sessions.map(x=>`<button class="btn" data-csess="${esc(x.id)}"><b>${esc(x.name)}</b><br><span class="small">${x.id===c.activeSession?"active · ":""}${fmtD(x.updated||x.created)}</span></button>`).join(" ")}</div><div class="field"><label>New session</label><input id="newcsname" maxlength="40" placeholder="e.g. mobile navigation fix"></div><div class="row"><button class="btn modal-cancel">Close</button><button class="btn pri" id="newcsbtn">Create clean session</button></div>`);
+  $$('[data-csess]').forEach(b=>b.onclick=async()=>{ await saveCoderSession(); c.activeSession=b.dataset.csess; S().chat=JSON.parse(JSON.stringify(activeCoderSession().chat||[])); closeModal(); await Store.save(); renderAll(); });
+  $("#newcsbtn").onclick=async()=>{ const n=$("#newcsname").value.trim()||"Untitled session"; await saveCoderSession(); const x={id:uid("sess"),name:n,created:nowISO(),updated:nowISO(),chat:[],checkpoint:""}; c.sessions.unshift(x); c.activeSession=x.id; S().chat=[]; closeModal(); await Store.save(); renderAll(); };
+}
+$("#coderplan").onclick=async()=>{ const c=coderState(); c.planMode=!c.planMode; await Store.save(); renderCoderWorkbench(); await audit("coder",`Plan mode ${c.planMode?"enabled":"disabled"}`); };
+$("#codersessions").onclick=openCoderSessions;
+$("#codercheckpoint").onclick=()=>createCoderCheckpoint(false);
+$("#codercompact").onclick=compactCoderContext;
 
 /* ---------------- evolve: recursive self-improvement ----------------
    Proposal-and-approve, honestly: Muse drafts a concrete improvement with
@@ -2430,4 +2493,5 @@ async function finishBoot(){
   setTimeout(()=>{ const g=S() && S().goals.find(x=>x.status==="active"); if(g) autoAdvance(g.id); }, 6000);
   setPresence("idle");
 }
+
 
