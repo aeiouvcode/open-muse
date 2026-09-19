@@ -2241,7 +2241,7 @@ function renderWorkforce(){
   const rl=$("#rosterlist");
   if(rl){
     rl.innerHTML=[
-      ...Object.entries(AgentRoles).map(([r,p])=>({name:r,desc:p.replace(/^You are the \u?\w* ?/,"").slice(0,120),builtin:true})),
+      ...Object.entries(AgentRoles).map(([r,p])=>({name:r,desc:p.split(". ").slice(1).join(". ").slice(0,120),builtin:true})),
       ...(s.agents||[]).map(a=>({id:a.id,name:a.name,desc:a.prompt,builtin:false}))
     ].map(a=>`<div class="skill"><span class="txt"><b>${esc(a.name)}${a.builtin?" <span style='color:var(--dim2)'>(built-in)</span>":""}</b><span>${esc(a.desc)}</span></span>${a.builtin?"":`<button class="btn badb" data-agdel="${a.id}" style="padding:3px 9px">×</button>`}</div>`).join("");
     $$("#rosterlist [data-agdel]").forEach(b=>b.onclick=async()=>{
