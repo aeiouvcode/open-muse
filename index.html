@@ -21,6 +21,7 @@
     <nav>
       <button class="navbtn on" data-view="chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chat</button>
       <button class="navbtn" data-view="goals"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/></svg>Goals &amp; plans</button>
+      <button class="navbtn" data-view="workforce"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>Workforce <span class="pill" id="agentcount" style="margin-left:auto">0</span></button>
       <button class="navbtn" data-view="memory"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 1 7 7c0 2.4-1.2 4-2.5 5.5S15 17.5 15 20a3 3 0 0 1-6 0c0-2.5-.5-3.5-1.5-5.5S5 11.4 5 9a7 7 0 0 1 7-7z"/></svg>Memory <span class="pill" id="memcount" style="margin-left:auto">0</span></button>
       <button class="navbtn" data-view="tools"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.1-2.1 2.7-2.5z"/></svg>Tools &amp; skills</button>
       <button class="navbtn" data-view="studio"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Studio <span class="pill" id="appcount" style="margin-left:auto">0</span></button>
@@ -77,6 +78,26 @@
           <div id="remlist"></div>
         </div>
         <div id="duestrip" class="duestrip" hidden></div><div class="goalgrid" id="goalgrid"></div>
+      </div>
+    </section>
+
+    <!-- WORKFORCE -->
+    <section class="view" id="view-workforce">
+      <div class="viewhead"><div><h2>Workforce</h2><div class="sub">Your custom agent roster, dependency-aware workforce runs, and scheduled automations - adapted from Eigent's open-source workforce, rebuilt for this browser. Agents are parallel model calls in this tab producing artifacts only; anything external still comes back to you for approval.</div></div></div>
+      <div class="viewbody">
+        <div class="taskbox">
+          <h3 style="margin:0">Roster</h3>
+          <div class="sub" style="font-size:12px;color:var(--dim)">Four built-in specialists ship with Muse. Add your own - a Workforce run's coordinator assigns subtasks across the whole roster.</div>
+          <div id="rosterlist"></div>
+          <div class="trow"><input id="newagentname" placeholder="Agent name - e.g. Data analyst" maxlength="40"><input id="newagentprompt" placeholder="Specialty - how this agent thinks and what it outputs" maxlength="280"><button class="btn" id="addagentbtn">Add agent</button></div>
+        </div>
+        <div class="taskbox">
+          <h3 style="margin:0">Automations</h3>
+          <div class="sub" style="font-size:12px;color:var(--dim)">Recurring prompts Muse runs on a schedule while this tab is open. Tab closed = orb asleep: missed runs surface as honest catch-ups on your return - they never run somewhere else.</div>
+          <div id="autolist"></div>
+          <div class="trow"><input id="newautotext" placeholder="e.g. Review my active goal and suggest the next move" maxlength="280"><select id="newautocad"><option value="hourly">Hourly</option><option value="daily" selected>Daily</option><option value="weekly">Weekly</option></select><button class="btn" id="addautobtn">Add automation</button></div>
+        </div>
+        <div class="small" style="color:var(--dim2);font-size:12px">Run a workforce from any goal card (Goals &amp; plans &rarr; Workforce). The coordinator splits the goal into a dependency graph of subtasks, assigns each to a roster agent, runs independent subtasks in parallel waves, hands each agent its dependencies' output, then merges everything into one deliverable.</div>
       </div>
     </section>
 
@@ -187,7 +208,7 @@
           <input type="password" id="setpass" autocomplete="new-password" placeholder="leave blank to keep storage unencrypted"></div>
         <div class="field"><label>Appearance</label>
           <div class="themerow" id="themerow">
-            <button class="swatch" data-theme-pick="serious" title="Serious (default)" style="background:#15181e"></button>
+            <button class="swatch" data-theme-pick="serious" title="Atelier (default)" style="background:#f2efe7;border-color:#c9c1ac"></button>
             <button class="swatch" data-theme-pick="violet" title="Violet" style="background:#1a2132"></button>
             <button class="swatch" data-theme-pick="ember" title="Ember" style="background:#241c1a"></button>
             <button class="swatch" data-theme-pick="paper" title="Paper (light)" style="background:#f5f4f1"></button>
