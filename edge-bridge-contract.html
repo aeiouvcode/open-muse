@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Open Muse x EDGE//AI bridge contract</title>
+<style>
+  body{font:15px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;background:#141210;color:#e8e2d6;max-width:760px;margin:40px auto;padding:0 20px}
+  h1{font-size:20px;color:#e08a5a} h2{font-size:15px;color:#c9a15a;margin-top:28px}
+  code,pre{background:#1e1a16;border:1px solid #322723;border-radius:6px}
+  pre{padding:12px;overflow:auto;font-size:13px} code{padding:1px 5px}
+  .tag{display:inline-block;border:1px solid #476a58;color:#8fceab;border-radius:4px;padding:1px 8px;font-size:12px}
+  .muted{color:#8b8175}
+</style>
+</head>
+<body>
+<h1>Open Muse x EDGE//AI bridge contract</h1>
+<p class="muted">Both apps are static sites on <code>aeiouvcode.github.io</code> (same origin). Open Muse embeds EDGE//AI in a hidden frame and talks to it with postMessage. No backend, no key; the model runs on the user's device. This page documents the wire format and - when loaded with the bridge params - acts as a working echo backend so either side can be tested alone. <span class="tag">v1</span></p>
+
+<h2>1. Frame URL</h2>
+<pre>https://aeiouvcode.github.io/edge-ai/?bridge=openmuse&amp;nonce=&lt;random&gt;</pre>
+<p>Open Muse generates the nonce per session and trusts only messages that echo it. Both sides check <code>event.origin === "https://aeiouvcode.github.io"</code>.</p>
+
+<h2>2. Handshake (edge -&gt; muse)</h2>
+<pre>{ edgeai: "ready", nonce, models: [ { id, name, params } ] }</pre>
+<p><code>models</code> lists chat-capable on-device models EDGE//AI can actually run. Sent once the frame is up.</p>
+
+<h2>3. Inference request (muse -&gt; edge)</h2>
+<pre>{ edgeai: "infer", id, nonce, model, stream: true|false,
+  messages: [ { role: "system"|"user"|"assistant", content: "..." } ] }</pre>
+
+<h2>4. Responses (edge -&gt; muse)</h2>
+<pre>{ edgeai: "chunk", id, text }   // accumulated text so far, 0..n times (stream mode)
+{ edgeai: "done",  id, text }   // final full text
+{ edgeai: "error", id, message }</pre>
+
+<h2>5. URL-param entry (no embed)</h2>
+<pre>https://aeiouvcode.github.io/edge-ai/?bridge=openmuse&amp;prompt=&lt;text&gt;</pre>
+<p>Opens EDGE//AI visibly and runs the prompt - the human handoff link.</p>
+
+<h2>6. Echo-stub mode (this page)</h2>
+<p>Loaded with <code>?bridge=openmuse&amp;nonce=...</code>, this page speaks the contract with a deterministic echo backend, so Open Muse's bridge can be verified end-to-end before (or after) EDGE//AI ships its side.</p>
+<p class="muted" id="stubstate">Loaded bare - documenting only.</p>
+
+<script>
+(function(){
+  const q=new URLSearchParams(location.search);
+  if(q.get("bridge")!=="openmuse") return;
+  const nonce=q.get("nonce")||"";
+  const PARENT="https://aeiouvcode.github.io";
+  document.getElementById("stubstate").textContent="Stub mode ACTIVE - speaking the bridge contract with an echo backend.";
+  const models=[{id:"stub-echo-1",name:"Stub Echo 1M",params:"1M"}];
+  function say(d){ if(window.parent&&window.parent!==window) window.parent.postMessage(d, PARENT); }
+  addEventListener("message", function(e){
+    if(e.origin!==PARENT) return;
+    const d=e.data||{};
+    if(d.edgeai!=="infer"||d.nonce!==nonce) return;
+    const last=(d.messages||[]).filter(m=>m.role==="user").pop();
+    const text="EDGE-STUB echo ("+(d.model||"stub-echo-1")+"): "+(last?last.content:"(empty)");
+    if(d.stream){
+      const words=text.split(" ");
+      let acc=""; let i=0;
+      const tick=()=>{ acc+=(i?" ":"")+words[i]; say({edgeai:"chunk", id:d.id, text:acc}); i++;
+        if(i<words.length) setTimeout(tick, 30); else say({edgeai:"done", id:d.id, text:acc}); };
+      tick();
+    } else {
+      say({edgeai:"done", id:d.id, text});
+    }
+  });
+  say({edgeai:"ready", nonce, models});
+})();
+</script>
+</body>
+</html>
