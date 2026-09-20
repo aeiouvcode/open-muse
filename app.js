@@ -206,16 +206,18 @@ function renderStatus(){
   $("#st-lastrow").hidden = !RT.last;
   $("#st-last").textContent = RT.last; $("#st-last").title = RT.last;
   const keyless = !!provider().local || !!provider().edge;
-  const keyTxt = sessionStorage.getItem("openmuse.key") ? "set (session)" : (s.settings.keyStored ? "set (device)" : null);
+  // A key left in session storage from another engine is irrelevant to a
+  // keyless provider - the rail reports what THIS engine needs and has.
+  const keyTxt = keyless ? null : (sessionStorage.getItem("openmuse.key") ? "set (session)" : (s.settings.keyStored ? "set (device)" : null));
   // Only name a provider/model once one is actually usable - a default label
   // with no key behind it is a claim the app can't back. Keyless providers
   // (local, EDGE//AI) are usable the moment they are selected.
-  const em = activeModel() || (provider().edge && EdgeBridge.loadedModel) || "";
-  const m = keyTxt ? provider().name + " / " + activeModel() : (keyless ? provider().name + (em ? " / " + em : "") : null);
+  const em = (provider().edge ? (EdgeBridge.loadedModel || activeModel()) : activeModel()) || "";
+  const m = keyless ? provider().name + (em ? " / " + em : "") : (keyTxt && em ? provider().name + " / " + em : null);
   $("#st-model").textContent = m || "none yet";
   $("#st-model").title = m || "";
   $("#st-model").classList.toggle("muted", !m);
-  $("#st-key").textContent = keyTxt || (keyless ? "not needed" : "none yet");
+  $("#st-key").textContent = keyless ? "not needed" : (keyTxt || "none yet");
   const cl=$("#st-cloak"); if(cl){ cl.textContent = Cloak.on() ? `on \u00b7 ${Cloak.rules().length} rule${Cloak.rules().length===1?"":"s"}` : "off"; cl.classList.toggle("muted", !Cloak.on()); }
   $("#st-key").classList.toggle("muted", !keyTxt && !keyless);
   $("#st-actions").textContent = s.counters.actions;
