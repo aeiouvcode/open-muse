@@ -446,3 +446,8 @@ body.agent-busy #mstrip .ms-dot{background:var(--acc2);animation:st-pulse 1.5s v
 .mdh{font-weight:650;line-height:1.3;margin:10px 0 3px;color:var(--ink)}
 .mdh1{font-size:1.22em}.mdh2{font-size:1.14em}.mdh3{font-size:1.06em}.mdh4{font-size:1em}
 .mdhr{border:0;border-top:1px solid var(--line,rgba(0,0,0,.12));margin:10px 0}
+.mdtable{border-collapse:collapse;margin:8px 0;font-size:.93em}
+.mdtable th,.mdtable td{border:1px solid var(--line);padding:4px 9px;text-align:left}
+.mdtable th{background:var(--bg2);font-weight:600}
+.mdlist{margin:4px 0 4px 20px}
+.mdlist li{margin:2px 0}
