@@ -108,7 +108,7 @@ const PROVIDERS = {
                  fallback:["openai/gpt-4o-mini","openai/gpt-4o","anthropic/claude-sonnet-4.5","google/gemini-2.5-flash","deepseek/deepseek-chat-v3-0324"] },
   tokenharbor: { name:"Token Harbor", url:"https://tokenharbor.ai/v1/chat/completions",    modelsUrl:"https://tokenharbor.ai/v1/models",    defModel:"deepseek-v4.1-flash:free", keyPh:"thk_live_...", hint:"Universal Key from the tokenharbor.ai dashboard - :free models never charge", authCatalog:true,
                  fallback:["deepseek-v4.1-flash:free","mimo-v2.5:free","muse-spark-3","kimi-k3","glm-5.3","gemini-3.8-flash"] },
-  nim:         { name:"NVIDIA NIM",   url:"https://integrate.api.nvidia.com/v1/chat/completions", modelsUrl:"https://integrate.api.nvidia.com/v1/models", defModel:"meta/llama-3.3-70b-instruct", keyPh:"nvapi-...", hint:"key from build.nvidia.com - free hosted endpoints, OpenAI-compatible", authCatalog:true,
+  nim:         { name:"NVIDIA NIM",   nim:true, defModel:"meta/llama-3.3-70b-instruct", keyPh:"nvapi-...", hint:"key from build.nvidia.com. Hosted calls go through NVIDIA's browser-friendly NVCF gateway - the integrate.api.nvidia.com host itself blocks browser calls (no CORS). Self-hosted NIM container? Point the endpoint at it (e.g. http://localhost:8000/v1).", authCatalog:true,
                  fallback:["meta/llama-3.3-70b-instruct","meta/llama-3.1-8b-instruct","meta/llama-3.2-3b-instruct","microsoft/phi-4-mini-instruct","deepseek-ai/deepseek-v4-flash","minimaxai/minimax-m2.5"] },
   local:       { name:"Local model",  local:true, defModel:"", keyPh:"no key needed", hint:"runs entirely on your machine - Ollama (ollama serve) or LM Studio's local server. No key, no cloud: prompts never leave this device.",
                  fallback:[] },
@@ -122,6 +122,10 @@ function provEndpoints(){
   const p = provider();
   if(p.local){
     const base = String(S().settings.localUrl || "http://localhost:11434/v1").replace(/\/+$/,"");
+    return { url: base + "/chat/completions", modelsUrl: base + "/models", base };
+  }
+  if(p.nim){
+    const base = String(S().settings.nimUrl || "https://api.nvcf.nvidia.com/v1").replace(/\/+$/,"");
     return { url: base + "/chat/completions", modelsUrl: base + "/models", base };
   }
   return { url: p.url, modelsUrl: p.modelsUrl, base: "" };
@@ -1405,6 +1409,9 @@ async function populateModelSelect(){
       else if(ids.length) note = ids.length + " on-device model" + (ids.length===1?"":"s") + " via EDGE//AI" + (EdgeBridge.loadedModel?` - loaded now: ${EdgeBridge.loadedModel}`:"");
     }catch(e){ ids = null; }
     if(ids===null){ ids = []; note = "EDGE//AI frame not up yet - the first run brings it up in a hidden frame; models load on the EDGE//AI side"; }
+  } else if(prov.nim){
+    $("#setmodelcustom").hidden = false;
+    if(!ids){ ids = prov.fallback.slice(); note = getKey() ? "catalog did not answer - showing common NIM models; type any id from build.nvidia.com below" : "enter your nvapi- key, save, then press \u21bb to load the catalog - showing common NIM models meanwhile"; }
   } else if(prov.local){
     $("#setmodelcustom").hidden = false;
     if(!ids){ ids = []; note = "no local server found at " + (S().settings.localUrl||"http://localhost:11434/v1") + " - start Ollama or LM Studio, press \u21bb, or type the model id below"; }
@@ -1413,6 +1420,7 @@ async function populateModelSelect(){
     $("#setmodelcustom").hidden = true;
     if(!ids){ ids = prov.fallback.slice(); note = prov.authCatalog && !getKey() ? "enter a key to load the full catalog - showing common models meanwhile" : "catalog unavailable - showing common models"; }
   }
+  if(prov.nim){ $("#setmodelcustom").hidden = false; }
   // free models to the top, FREE-marked (Token Harbor convention), rest alphabetical
   const free = ids.filter(id=>id.endsWith(":free")).sort();
   const paid = ids.filter(id=>!id.endsWith(":free")).sort();
@@ -1447,8 +1455,18 @@ function syncProviderUI(){
   $("#keyhint").innerHTML = prov.edge
     ? 'the EDGE//AI app runs the model in a hidden frame on this device. <a href="https://aeiouvcode.github.io/edge-ai/" target="_blank" rel="noopener">Open EDGE//AI</a> to unlock it and load a chat model - Muse never downloads or switches models on its own.'
     : String(prov.hint||"").replace(/</g,"&lt;");
-  const isLocal = !!prov.local, keyless = isLocal || !!prov.edge;
-  $("#localurlwrap").hidden = !isLocal;
+  const isLocal = !!prov.local, isNim = !!prov.nim, keyless = isLocal || !!prov.edge;
+  $("#localurlwrap").hidden = !(isLocal || isNim);
+  if(isNim){
+    $("#localurlwrap label").textContent = "NIM endpoint base URL";
+    $("#setlocalurl").placeholder = "https://api.nvcf.nvidia.com/v1";
+    $("#localurlwrap .small").textContent = "Default is NVIDIA's NVCF gateway, which allows browser calls. Self-hosted NIM containers listen on 8000 by default.";
+    $("#setlocalurl").value = S().settings.nimUrl || "";
+  } else if(isLocal){
+    $("#localurlwrap label").textContent = "Local server base URL";
+    $("#setlocalurl").placeholder = "http://localhost:11434/v1";
+    $("#localurlwrap .small").textContent = "Ollama listens on 11434, LM Studio on 1234. The model list refresh reads what your server has.";
+  }
   $("#setkey").disabled = keyless;
   $("#setsavekey").disabled = keyless;
   $("#keylabel").textContent = keyless
@@ -1463,10 +1481,12 @@ $("#savesettings").addEventListener("click", async ()=>{
   const pv=$("#setprovider").value, remember=$("#setsavekey").checked;
   const isLocal = pv==="local";
   S().settings.provider = pv;
-  if(isLocal){
-    const base=$("#setlocalurl").value.trim() || "http://localhost:11434/v1";
-    if(!/^https?:\/\/[\w.:\/-]+$/.test(base)){ toast("Local server URL looks wrong - e.g. http://localhost:11434/v1"); return; }
-    S().settings.localUrl = base;
+  const isNim = pv==="nim";
+  if(isLocal || isNim){
+    const dflt = isLocal ? "http://localhost:11434/v1" : "https://api.nvcf.nvidia.com/v1";
+    const base=$("#setlocalurl").value.trim() || dflt;
+    if(!/^https?:\/\/[\w.:\/-]+$/.test(base)){ toast("Endpoint URL looks wrong - e.g. "+dflt); return; }
+    if(isLocal) S().settings.localUrl = base; else S().settings.nimUrl = base;
   }
   if(k && !isLocal){
     sessionStorage.setItem("openmuse.key", k);
@@ -1474,11 +1494,11 @@ $("#savesettings").addEventListener("click", async ()=>{
     if(remember) S().settings.keyStored = k;
   }
   if(!remember) S().settings.keyStored = "";
-  const custom = isLocal ? $("#setmodelcustom").value.trim() : "";
+  const custom = (isLocal || isNim) ? $("#setmodelcustom").value.trim() : "";
   const chosen = custom || m;
   if(chosen && !/^[\w.:/-]{1,100}$/.test(chosen)){ toast("Model id has invalid characters."); return; }
   S().settings.model = chosen;  // blank = provider default
-  if(isLocal) $("#setmodelcustom").value = "";
+  if(isLocal || isNim) $("#setmodelcustom").value = "";
   if(p){
     if(p.length < 8){ toast("Passphrase needs at least 8 characters."); return; }
     $("#setpass").value = "";
