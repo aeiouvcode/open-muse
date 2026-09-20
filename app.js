@@ -418,21 +418,51 @@ function renderChat(){
   log.scrollTop = log.scrollHeight;
 }
 function inlineMd(t){
-  return esc(t)
-    .replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>")
-    .replace(/`([^`]+)`/g,"<code>$1</code>")
-    .replace(/^####\s+(.+?)\s*\n?$/gm,'<div class="mdh mdh4">$1</div>')
-    .replace(/^###\s+(.+?)\s*\n?$/gm,'<div class="mdh mdh3">$1</div>')
-    .replace(/^##\s+(.+?)\s*\n?$/gm,'<div class="mdh mdh2">$1</div>')
-    .replace(/^#\s+(.+?)\s*\n?$/gm,'<div class="mdh mdh1">$1</div>')
-    .replace(/^---+\s*\n?$/gm,'<hr class="mdhr">')
-    .replace(/\n/g,"<br>");
+  return esc(t).replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>").replace(/`([^`]+)`/g,"<code>$1</code>");
+}
+/* Block-level markdown for chat/plan/merge text: pipe tables, bullet and
+   numbered lists, headings, rules. Code blocks are already carved out by
+   mdLite before this runs, so |-lines here are never inside code. */
+function blockMd(t){
+  const lines=String(t).split("\n"), out=[];
+  let i=0;
+  const isTable = l => /^\s*\|.*\|\s*$/.test(l);
+  const isSep   = l => /^\s*\|[\s:|-]+\|\s*$/.test(l);
+  const isUl    = l => /^\s*[-*]\s+/.test(l);
+  const isOl    = l => /^\s*\d+\.\s+/.test(l);
+  const cells = r => r.replace(/^\s*\|/,"").replace(/\|\s*$/,"").split("|").map(c=>inlineMd(c.trim()));
+  while(i<lines.length){
+    const l=lines[i];
+    if(isTable(l)){
+      const rows=[];
+      while(i<lines.length && isTable(lines[i])) rows.push(lines[i++]);
+      let html='<table class="mdtable">', start=0;
+      if(rows.length>1 && isSep(rows[1])){ html+="<tr>"+cells(rows[0]).map(c=>"<th>"+c+"</th>").join("")+"</tr>"; start=2; }
+      for(let r=start;r<rows.length;r++) html+="<tr>"+cells(rows[r]).map(c=>"<td>"+c+"</td>").join("")+"</tr>";
+      out.push(html+"</table>"); continue;
+    }
+    if(isUl(l)){
+      const items=[];
+      while(i<lines.length && isUl(lines[i])) items.push("<li>"+inlineMd(lines[i++].replace(/^\s*[-*]\s+/,""))+"</li>");
+      out.push('<ul class="mdlist">'+items.join("")+"</ul>"); continue;
+    }
+    if(isOl(l)){
+      const items=[];
+      while(i<lines.length && isOl(lines[i])) items.push("<li>"+inlineMd(lines[i++].replace(/^\s*\d+\.\s+/,""))+"</li>");
+      out.push('<ol class="mdlist">'+items.join("")+"</ol>"); continue;
+    }
+    const hm=l.match(/^(#{1,4})\s+(.+?)\s*$/);
+    if(hm){ out.push('<div class="mdh mdh'+hm[1].length+'">'+inlineMd(hm[2])+"</div>"); i++; continue; }
+    if(/^---+\s*$/.test(l)){ out.push('<hr class="mdhr">'); i++; continue; }
+    out.push(inlineMd(l)); i++;
+  }
+  return out.join("\n").replace(/\n/g,"<br>");
 }
 function mdLite(t){
   const re = /```([a-zA-Z]*)\n?([\s\S]*?)```/;
   let out = "", rest = String(t), m;
   while((m = rest.match(re))){
-    out += inlineMd(rest.slice(0, m.index));
+    out += blockMd(rest.slice(0, m.index));
     const lang = m[1] || "", code = m[2].replace(/\n$/, "");
     const html = lang === "diff"
       ? esc(code).split("\n").map(l => `<span class="dl ${l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : l.startsWith("@") ? "hunk" : ""}">${l || " "}</span>`).join("\n")
@@ -440,7 +470,7 @@ function mdLite(t){
     out += `<pre class="codeblock"${lang ? ` data-lang="${esc(lang)}"` : ""}><code>${html}</code></pre>`;
     rest = rest.slice(m.index + m[0].length);
   }
-  return out + inlineMd(rest);
+  return out + blockMd(rest);
 }
 
 /* ---------------- privacy cloak (AgentCloak-style, fully local) ----------------
