@@ -2454,6 +2454,22 @@ $("#setdensity").addEventListener("change", async()=>{ S().settings.density=$("#
 $("#setfont").addEventListener("change", async()=>{ S().settings.font=$("#setfont").value; applyAppearance(); await Store.save(); });
 
 /* ---------------- boot ---------------- */
+/* Free tiers and busy providers rate-limit parallel agent waves (429).
+   Retry a team/workforce model call with backoff before failing the agent;
+   non-transient errors (auth, bad model) fail immediately. */
+async function teamCall(fn){
+  let err;
+  for(let i=0;i<3;i++){
+    try{ return await fn(); }
+    catch(e){
+      err=e;
+      if(!/\b429\b|\b5\d\d\b/.test(String(e&&e.message||e))) break;
+      if(i<2) await new Promise(r=>setTimeout(r, 5000*(i+1)+Math.floor(Math.random()*2000)));
+    }
+  }
+  throw err;
+}
+
 /* ---------------- multi-agent: teams and swarms ----------------
    The orchestrator asks the model to split a goal into role-shaped subtasks
    (researcher / coder / reviewer / writer), runs them in parallel with a
@@ -2490,10 +2506,10 @@ async function runTeam(goalId, mode){
              {role:"coder",task:"Design the concrete plan or artifact for: "+g.title},
              {role:"reviewer",task:"Red-team likely approaches to: "+g.title}];
     } else {
-      const decomp = await ai.generateText({messages:[
+      const decomp = await teamCall(()=>ai.generateText({messages:[
         {role:"system",content:"You decompose goals for a small agent team. Reply with strict JSON only: {\"agents\":[{\"role\":\"researcher|coder|reviewer|writer\",\"task\":\"<one concrete self-contained subtask>\"}]} - 2 to 4 agents, no dependencies between tasks."},
         {role:"user",content:g.title}
-      ], json:true});
+      ], json:true}));
       try{ specs=(JSON.parse(decomp).agents||[]).slice(0,4); if(!specs.length) throw 0; }
       catch(e){ specs=[{role:"researcher",task:"Research: "+g.title},{role:"writer",task:"Draft the deliverable for: "+g.title}]; }
     }
@@ -2505,19 +2521,19 @@ async function runTeam(goalId, mode){
     await Promise.all(TEAM.agents.map(async ag=>{
       ag.status="running"; renderStatus();
       try{
-        let out = await ai.generateText({messages:[
+        let out = await teamCall(()=>ai.generateText({messages:[
           {role:"system",content:AgentRoles[ag.role]},
           {role:"user",content:ag.task+(g.note?`\nSteering: ${g.note}`:"")+(g.due?`\nDue: ${g.due}`:"")}
-        ]});
+        ]}));
         if(ag.role==="researcher"){
           const calls=parseToolCalls(out);
           if(calls.length){
             const results=[];
             for(const c of calls.slice(0,3)){ results.push({tool:c.tool, result:await execTool(c.tool, c.args||{})}); }
-            out = await ai.generateText({messages:[
+            out = await teamCall(()=>ai.generateText({messages:[
               {role:"system",content:AgentRoles[ag.role]},
               {role:"user",content:ag.task+"\n\nTool results:\n"+results.map(r=>`[${r.tool}]\n${r.result}`).join("\n\n")+"\n\nWrite the final findings from this material."}
-            ]});
+            ]}));
           }
         }
         ag.output=out; ag.status="done";
@@ -2526,12 +2542,15 @@ async function runTeam(goalId, mode){
     }));
     const ok = TEAM.agents.filter(x=>x.status==="done");
     let merged;
-    if(!ok.length){ merged="Every agent failed - check the model key in Settings and try again."; }
+    if(!ok.length){
+      const firstErr=(TEAM.agents.find(x=>x.status==="failed"&&x.output)||{}).output||"";
+      merged="Every agent failed. " + friendlyModelError(firstErr || "unknown");
+    }
     else{
-      merged = await ai.generateText({messages:[
+      merged = await teamCall(()=>ai.generateText({messages:[
         {role:"system",content:"You are the orchestrator. Merge your agent team's work into one coherent deliverable: keep what survives scrutiny, drop what does not. End with one line naming what you merged."},
         {role:"user",content:`Goal: ${g.title}\n${g.note?`Steering: ${g.note}\n`:""}${g.due?`Due: ${g.due}\n`:""}\n`+ok.map(x=>`[${x.role} - ${x.task}]\n${x.output}`).join("\n\n---\n\n")}
-      ]});
+      ]}));
     }
     await addMsg("muse", `Team merge on \u201c${g.title}\u201d (${ok.length}/${TEAM.agents.length} agents delivered):\n\n${merged}`);
     await audit("team", `Team finished on "${g.title}" (${ok.length}/${TEAM.agents.length} ok)`);
@@ -2564,10 +2583,10 @@ async function runWorkforce(goalId){
     const rosterDesc=Object.keys(AgentRoles).map(r=>"- "+r).join("\n")
       + (s.agents||[]).map(a=>"\n- "+a.name+": "+a.prompt).join("");
     let tasks;
-    const decomp = await ai.generateText({messages:[
+    const decomp = await teamCall(()=>ai.generateText({messages:[
       {role:"system",content:"You are the coordinator of a small agent workforce. Decompose the goal into 3 to 6 subtasks as a dependency graph. Reply with strict JSON only: {\"tasks\":[{\"id\":\"t1\",\"role\":\"<roster role>\",\"task\":\"<one concrete self-contained subtask>\",\"depends\":[\"<id of an earlier task whose output this subtask needs>\"]}]}. Rules:\n- Assign roles only from this roster:\n"+rosterDesc+"\n- depends lists earlier task ids only (t1 may not depend on t3); a subtask with no dependencies gets [].\n- Independent subtasks must NOT depend on each other, so they run in parallel.\n- Make the final subtask synthesize the deliverable from whatever it needs."},
       {role:"user",content:g.title+(g.note?"\nSteering: "+g.note:"")}
-    ], json:true});
+    ], json:true}));
     try{
       tasks=(JSON.parse(decomp).tasks||[]).slice(0,6);
       if(tasks.length<2) throw 0;
@@ -2604,19 +2623,19 @@ async function runWorkforce(goalId){
         const depOut=t.depends.map(d=>byId(d)).filter(x=>x && x.status==="done")
           .map(x=>"["+x.role+" delivered]\n"+x.output.slice(0,2200)).join("\n\n");
         try{
-          let out=await ai.generateText({messages:[
+          let out=await teamCall(()=>ai.generateText({messages:[
             {role:"system",content:rolePrompt(t.role)},
             {role:"user",content:t.task+(g.note?"\nSteering: "+g.note:"")+(g.due?"\nDue: "+g.due:"")+(depOut?"\n\nWork handed to you by earlier agents:\n"+depOut:"")}
-          ]});
+          ]}));
           if(t.role==="researcher"){
             const calls=parseToolCalls(out);
             if(calls.length){
               const results=[];
               for(const c of calls.slice(0,3)){ results.push({tool:c.tool, result:await execTool(c.tool, c.args||{})}); }
-              out=await ai.generateText({messages:[
+              out=await teamCall(()=>ai.generateText({messages:[
                 {role:"system",content:rolePrompt(t.role)},
                 {role:"user",content:t.task+"\n\nTool results:\n"+results.map(r=>`[${r.tool}]\n${r.result}`).join("\n\n")+"\n\nWrite the final findings from this material."}
-              ]});
+              ]}));
             }
           }
           t.output=out; t.status="done";
@@ -2626,12 +2645,15 @@ async function runWorkforce(goalId){
     }
     const ok=TEAM.agents.filter(x=>x.status==="done");
     let merged;
-    if(!ok.length){ merged="Every workforce agent failed - check the model key in Settings and try again."; }
+    if(!ok.length){
+      const firstErr=(TEAM.agents.find(x=>x.status==="failed"&&x.output)||{}).output||"";
+      merged="Every workforce agent failed. " + friendlyModelError(firstErr || "unknown");
+    }
     else{
-      merged=await ai.generateText({messages:[
+      merged=await teamCall(()=>ai.generateText({messages:[
         {role:"system",content:"You are the coordinator. Merge your workforce's deliverables into one coherent final answer: keep what survives scrutiny, resolve conflicts, drop what failed. End with one line naming what you merged."},
         {role:"user",content:`Goal: ${g.title}\n`+ok.map(x=>`[${x.role} - ${x.task}]\n${x.output}`).join("\n\n---\n\n")}
-      ]});
+      ]}));
     }
     await addMsg("muse", `Workforce merge on \u201c${g.title}\u201d (${ok.length}/${TEAM.agents.length} subtasks delivered):\n\n${merged}`);
     await audit("workforce", `Workforce finished on "${g.title}" (${ok.length}/${TEAM.agents.length} ok)`);
