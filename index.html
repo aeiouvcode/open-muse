@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Open Muse - a personal agent that belongs to you</title>
 <meta name="description" content="Open Muse is an open-source, local-first personal AI agent: goals to plans, approvals, memory, audit trail and a private local vault. Your machine, your rules.">
-<link rel="stylesheet" href="styles.css?v=md2-20sep3">
+<link rel="stylesheet" href="styles.css?v=deep-20sep5">
 </head>
 <body>
 <button id="menubtn" title="Menu">☰</button>
@@ -73,6 +73,7 @@
       <div id="chatlog"></div>
       <div id="composer">
         <textarea id="chatinput" placeholder="Tell Muse what needs to get done...  (try: 'my goal is to run a 10k in 10 weeks')" rows="1"></textarea>
+        <button id="stopbtn" hidden title="Stop the reply">Stop</button>
         <button id="sendbtn">Send</button>
       </div>
     </section>
@@ -227,6 +228,7 @@
           <label for="setsavekey" style="margin:0;display:inline;font-size:13px">Remember key on this device (kept inside your Personal VM - encrypted when a passphrase is set)</label></div>
         <div class="field"><label>Model</label>
           <div style="display:flex;gap:8px">
+            <input id="modelfilter" placeholder="filter models..." style="width:120px" title="Narrow the model list">
             <select id="setmodel" style="flex:1"></select>
             <button class="btn" id="refreshmodels" title="Reload the provider catalog">↻</button>
           </div>
@@ -295,7 +297,7 @@
 <!-- modal -->
 <div id="modalwrap"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
-<script src="app.js?v=md3-20sep4"></script>
+<script src="app.js?v=deep-20sep5"></script>
 </body>
 </html>
 
