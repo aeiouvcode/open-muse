@@ -106,8 +106,10 @@ const S = () => Store.raw;
 const PROVIDERS = {
   openrouter:  { name:"OpenRouter",   url:"https://openrouter.ai/api/v1/chat/completions", modelsUrl:"https://openrouter.ai/api/v1/models", defModel:"openai/gpt-4o-mini",       keyPh:"sk-or-...",    hint:"key from openrouter.ai/keys",
                  fallback:["openai/gpt-4o-mini","openai/gpt-4o","anthropic/claude-sonnet-4.5","google/gemini-2.5-flash","deepseek/deepseek-chat-v3-0324"] },
-  tokenharbor: { name:"Token Harbor", url:"https://tokenharbor.ai/v1/chat/completions",    modelsUrl:"https://tokenharbor.ai/v1/models",    defModel:"deepseek-v4.1-flash:free", keyPh:"thk_live_...", hint:"Universal Key from the tokenharbor.ai dashboard - :free models never charge",
+  tokenharbor: { name:"Token Harbor", url:"https://tokenharbor.ai/v1/chat/completions",    modelsUrl:"https://tokenharbor.ai/v1/models",    defModel:"deepseek-v4.1-flash:free", keyPh:"thk_live_...", hint:"Universal Key from the tokenharbor.ai dashboard - :free models never charge", authCatalog:true,
                  fallback:["deepseek-v4.1-flash:free","mimo-v2.5:free","muse-spark-3","kimi-k3","glm-5.3","gemini-3.8-flash"] },
+  nim:         { name:"NVIDIA NIM",   url:"https://integrate.api.nvidia.com/v1/chat/completions", modelsUrl:"https://integrate.api.nvidia.com/v1/models", defModel:"meta/llama-3.3-70b-instruct", keyPh:"nvapi-...", hint:"key from build.nvidia.com - free hosted endpoints, OpenAI-compatible", authCatalog:true,
+                 fallback:["meta/llama-3.3-70b-instruct","meta/llama-3.1-8b-instruct","meta/llama-3.2-3b-instruct","microsoft/phi-4-mini-instruct","deepseek-ai/deepseek-v4-flash","minimaxai/minimax-m2.5"] },
   local:       { name:"Local model",  local:true, defModel:"", keyPh:"no key needed", hint:"runs entirely on your machine - Ollama (ollama serve) or LM Studio's local server. No key, no cloud: prompts never leave this device.",
                  fallback:[] },
   edge:        { name:"On-device (EDGE//AI)", edge:true, defModel:"", keyPh:"no key needed", hint:"the EDGE//AI app runs the model in a hidden frame on this device - first use downloads model weights (Hugging Face), after that it works offline. No key, no cloud.",
@@ -647,7 +649,7 @@ function getKey(){ return sessionStorage.getItem("openmuse.key") || (S() && S().
 /* human-readable model errors: never show raw provider JSON in chat */
 function friendlyModelError(e){
   const m = String(e && e.message || e);
-  if(m==="no-key") return "No model key set. Open Muse is BYO-key: paste a key in Settings (OpenRouter or Token Harbor) - it stays in this browser. Or pick the Local provider and run a model on this machine with no key at all.";
+  if(m==="no-key") return "No model key set. Open Muse is BYO-key: paste a key in Settings (OpenRouter, Token Harbor or NVIDIA NIM) - it stays in this browser. Or pick the Local provider and run a model on this machine with no key at all.";
   if(m==="no-model") return provider().edge
     ? "No on-device model is loaded. Open EDGE//AI (aeiouvcode.github.io/edge-ai), load a chat model there, then come back - Muse never downloads or switches models on its own."
     : "No model selected. Open Settings and refresh the model list once your local server is up - or just type the model id (e.g. llama3.1:8b).";
@@ -1375,7 +1377,7 @@ async function proactiveNudge(){
 async function fetchCatalog(pv){
   const prov = PROVIDERS[pv] || PROVIDERS.openrouter;
   const key = getKey();
-  if(pv === "tokenharbor" && !key) return null;   // TH catalog is auth-gated
+  if(prov.authCatalog && !key) return null;   // TH/NIM catalogs are auth-gated
   const mu = prov.local ? provEndpoints().modelsUrl : prov.modelsUrl;
   try{
     const r = await fetch(mu, {headers: key ? {"Authorization":"Bearer "+key} : {}});
@@ -1409,7 +1411,7 @@ async function populateModelSelect(){
     else note = ids.length + " model" + (ids.length===1?"":"s") + " served locally - prompts never leave this device";
   } else {
     $("#setmodelcustom").hidden = true;
-    if(!ids){ ids = prov.fallback.slice(); note = pv==="tokenharbor" && !getKey() ? "enter a key to load the full catalog" : "catalog unavailable - showing common models"; }
+    if(!ids){ ids = prov.fallback.slice(); note = prov.authCatalog && !getKey() ? "enter a key to load the full catalog - showing common models meanwhile" : "catalog unavailable - showing common models"; }
   }
   // free models to the top, FREE-marked (Token Harbor convention), rest alphabetical
   const free = ids.filter(id=>id.endsWith(":free")).sort();
