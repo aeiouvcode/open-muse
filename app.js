@@ -205,16 +205,19 @@ function renderStatus(){
   } else teamBox.hidden = true;
   $("#st-lastrow").hidden = !RT.last;
   $("#st-last").textContent = RT.last; $("#st-last").title = RT.last;
+  const keyless = !!provider().local || !!provider().edge;
   const keyTxt = sessionStorage.getItem("openmuse.key") ? "set (session)" : (s.settings.keyStored ? "set (device)" : null);
   // Only name a provider/model once one is actually usable - a default label
-  // with no key behind it is a claim the app can't back.
-  const m = keyTxt ? provider().name + " / " + activeModel() : null;
+  // with no key behind it is a claim the app can't back. Keyless providers
+  // (local, EDGE//AI) are usable the moment they are selected.
+  const em = activeModel() || (provider().edge && EdgeBridge.loadedModel) || "";
+  const m = keyTxt ? provider().name + " / " + activeModel() : (keyless ? provider().name + (em ? " / " + em : "") : null);
   $("#st-model").textContent = m || "none yet";
   $("#st-model").title = m || "";
   $("#st-model").classList.toggle("muted", !m);
-  $("#st-key").textContent = keyTxt || "none yet";
+  $("#st-key").textContent = keyTxt || (keyless ? "not needed" : "none yet");
   const cl=$("#st-cloak"); if(cl){ cl.textContent = Cloak.on() ? `on \u00b7 ${Cloak.rules().length} rule${Cloak.rules().length===1?"":"s"}` : "off"; cl.classList.toggle("muted", !Cloak.on()); }
-  $("#st-key").classList.toggle("muted", !keyTxt);
+  $("#st-key").classList.toggle("muted", !keyTxt && !keyless);
   $("#st-actions").textContent = s.counters.actions;
   const pending = s.goals.flatMap(g=>g.plan.steps).filter(x=>x.status==="approval").length;
   $("#st-pending").textContent = pending;
@@ -1350,7 +1353,9 @@ function syncProviderUI(){
   const pv = $("#setprovider").value;
   const prov = PROVIDERS[pv] || PROVIDERS.openrouter;
   $("#setkey").placeholder = prov.keyPh;
-  $("#keyhint").textContent = prov.hint;
+  $("#keyhint").innerHTML = prov.edge
+    ? 'the EDGE//AI app runs the model in a hidden frame on this device. <a href="https://aeiouvcode.github.io/edge-ai/" target="_blank" rel="noopener">Open EDGE//AI</a> to unlock it and load a chat model - Muse never downloads or switches models on its own.'
+    : String(prov.hint||"").replace(/</g,"&lt;");
   const isLocal = !!prov.local, keyless = isLocal || !!prov.edge;
   $("#localurlwrap").hidden = !isLocal;
   $("#setkey").disabled = keyless;
