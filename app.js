@@ -396,13 +396,14 @@ function addMsg(role, text, kind){
 function renderChat(){
   const s=S(); if(!s) return;
   const log=$("#chatlog");
-  log.innerHTML = s.chat.map(m => {
+  log.innerHTML = s.chat.map((m,mi) => {
     if(m.kind==="card") return m.text;   // pre-rendered card html (approval/suggestion cards render live below)
     if(m.kind==="tool"){ const [t,r]=m.text.split("|||"); return `<div class="toolcard"><b>⚙ ${esc(t)}</b><div class="res">${esc(r)}</div></div>`; }
     const cls = (m.role==="user" ? "user" : m.role==="sys" ? "sys" : "muse") + (m.kind==="checkpoint" ? " checkpoint" : "");
     const body = m.role==="muse" ? mdLite(m.text) : esc(m.text);
-    return `<div class="msg ${cls}"><div class="body">${body}</div><div class="meta">${fmtT(m.ts)}</div></div>`;
+    return `<div class="msg ${cls}"><div class="body">${body}</div><div class="meta">${fmtT(m.ts)} <button class="msgcopy" data-mi="${mi}" title="Copy message">copy</button></div></div>`;
   }).join("");
+  $$("#chatlog .msgcopy").forEach(b=>b.onclick=async()=>{ const m=S().chat[+b.dataset.mi]; if(!m) return; try{ await navigator.clipboard.writeText(m.text); b.textContent="copied"; setTimeout(()=>b.textContent="copy",1200); }catch(e){ toast("Copy failed - select the text manually."); } });
   // live approval cards
   s.goals.forEach(g => g.plan.steps.forEach(x => {
     if(x.status==="approval" && !document.getElementById("ap-"+x.id)){
@@ -418,7 +419,12 @@ function renderChat(){
   log.scrollTop = log.scrollHeight;
 }
 function inlineMd(t){
-  return esc(t).replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>").replace(/\*([^*\n]+)\*/g,"<i>$1</i>").replace(/`([^`]+)`/g,"<code>$1</code>");
+  return esc(t)
+    .replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>")
+    .replace(/\*([^*\n]+)\*/g,"<i>$1</i>")
+    .replace(/~~([^~]+)~~/g,"<s>$1</s>")
+    .replace(/`([^`]+)`/g,"<code>$1</code>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
 }
 /* Block-level markdown for chat/plan/merge text: pipe tables, bullet and
    numbered lists, headings, rules. Code blocks are already carved out by
@@ -451,6 +457,11 @@ function blockMd(t){
       const items=[];
       while(i<lines.length && isOl(lines[i])) items.push("<li>"+inlineMd(lines[i++].replace(/^\s*\d+\.\s+/,""))+"</li>");
       out.push('<ol class="mdlist"'+(firstN>1?' start="'+firstN+'"':"")+'>'+items.join("")+"</ol>"); continue;
+    }
+    if(/^\s*>\s?/.test(l)){
+      const ql=[];
+      while(i<lines.length && /^\s*>\s?/.test(lines[i])) ql.push(inlineMd(lines[i++].replace(/^\s*>\s?/,"")));
+      out.push('<blockquote class="mdq">'+ql.join("<br>")+"</blockquote>"); continue;
     }
     const hm=l.match(/^(#{1,4})\s+(.+?)\s*$/);
     if(hm){ out.push('<div class="mdh mdh'+hm[1].length+'">'+inlineMd(hm[2])+"</div>"); i++; continue; }
@@ -656,7 +667,7 @@ function friendlyModelError(e){
   return "Model call failed: "+m.slice(0,140);
 }
 
-async function chatStream(messages, onTok){
+async function chatStream(messages, onTok, signal){
   const key=getKey(); const prov=provider(); const ep=provEndpoints();
   if(!key && !prov.local && !prov.edge) throw new Error("no-key");
   if(prov.local && !activeModel()) throw new Error("no-model");
@@ -672,19 +683,26 @@ async function chatStream(messages, onTok){
   const r = await fetch(ep.url, {
     method:"POST",
     headers,
+    signal: signal || undefined,
     body: JSON.stringify({ model: activeModel(), messages, stream:true, temperature:0.7 })
   });
   if(!r.ok){ const t=await r.text(); throw new Error("model "+r.status+": "+t.slice(0,160)); }
   const rd=r.body.getReader(); const dec=new TextDecoder(); let buf="", out="";
-  for(;;){
-    const {done,value}=await rd.read(); if(done) break;
-    buf+=dec.decode(value,{stream:true});
-    let i; while((i=buf.indexOf("\n"))>=0){
-      const line=buf.slice(0,i).trim(); buf=buf.slice(i+1);
-      if(!line.startsWith("data:")) continue;
-      const d=line.slice(5).trim(); if(d==="[DONE]") return Cloak.back(out);
-      try{ const tok=JSON.parse(d).choices?.[0]?.delta?.content || ""; if(tok){ out+=tok; onTok && onTok(Cloak.back(out)); } }catch(e){}
+  try{
+    for(;;){
+      const {done,value}=await rd.read(); if(done) break;
+      buf+=dec.decode(value,{stream:true});
+      let i; while((i=buf.indexOf("\n"))>=0){
+        const line=buf.slice(0,i).trim(); buf=buf.slice(i+1);
+        if(!line.startsWith("data:")) continue;
+        const d=line.slice(5).trim(); if(d==="[DONE]") return Cloak.back(out);
+        try{ const tok=JSON.parse(d).choices?.[0]?.delta?.content || ""; if(tok){ out+=tok; onTok && onTok(Cloak.back(out)); } }catch(e){}
+      }
     }
+  }catch(e){
+    // user pressed Stop: keep whatever streamed in, hand it back partial
+    if(signal && signal.aborted) return Cloak.back(out);
+    throw e;
   }
   return Cloak.back(out);
 }
@@ -1143,12 +1161,22 @@ async function sendChat(auto){
   el.innerHTML=`<div class="body"><span class="typing"><i></i><i></i><i></i></span></div>`;
   log.appendChild(el); log.scrollTop=log.scrollHeight;
   setPresence("thinking");
+  // stop control: aborting keeps the partial reply instead of discarding it
+  const ctl=new AbortController();
+  let lastPartial="";
+  const stopBtn=$("#stopbtn");
+  if(!provider().edge){ stopBtn.hidden=false; stopBtn.onclick=()=>{ ctl.abort(); stopBtn.hidden=true; }; }
   const hist=S().chat.slice(-14).filter(m=>m.role!=="sys"&&!m.kind).map(m=>({role:m.role==="muse"?"assistant":m.role, content:m.text}));
   try{
     const m0 = mode();
     const sys = m0==="coder" ? coderPrompt(await ownSource()) : m0==="chat" ? chatPrompt(text) : systemPrompt(text);
-    const out=await chatStream([{role:"system",content:sys}, ...hist], partial=>{ el.querySelector(".body").innerHTML=mdLite(partial); log.scrollTop=log.scrollHeight; });
-    el.remove();
+    let out=await chatStream([{role:"system",content:sys}, ...hist], partial=>{ lastPartial=partial; el.querySelector(".body").innerHTML=mdLite(partial); log.scrollTop=log.scrollHeight; }, ctl.signal);
+    el.remove(); stopBtn.hidden=true;
+    if(ctl.signal.aborted){
+      out = (lastPartial||"").trim();
+      await addMsg("muse", out ? out + "\n\n*(stopped - reply cut short at your request)*" : "Stopped before the reply got going - nothing was sent onward.");
+      await Store.save(); renderAll(); setPresence("idle"); return;
+    }
     const calls = m0==="agent" ? parseToolCalls(out) : [];
     if(calls.length){
       const display = stripToolFences(out).trim();
@@ -1175,8 +1203,13 @@ async function sendChat(auto){
     }
     learnFrom(text).catch(async e=>audit("error","memory extraction failed: "+String(e).slice(0,120)));
   }catch(e){
-    el.remove();
-    await addMsg("sys", friendlyModelError(e));
+    el.remove(); stopBtn.hidden=true;
+    if(ctl.signal.aborted){
+      const p=(lastPartial||"").trim();
+      await addMsg("muse", p ? p + "\n\n*(stopped - reply cut short at your request)*" : "Stopped before the reply got going - nothing was sent onward.");
+    } else {
+      await addMsg("sys", friendlyModelError(e));
+    }
     renderChat();
   }
   setPresence("idle");
@@ -1383,13 +1416,28 @@ async function populateModelSelect(){
   const paid = ids.filter(id=>!id.endsWith(":free")).sort();
   const ordered = [...free, ...paid];
   if(current && !ordered.includes(current)) ordered.unshift(current);
-  sel.innerHTML = ordered.map(id=>{
+  MODEL_SELECT_CACHE.ids = ordered; MODEL_SELECT_CACHE.current = current; MODEL_SELECT_CACHE.note = note; MODEL_SELECT_CACHE.provName = prov.name;
+  applyModelFilter();
+}
+const MODEL_SELECT_CACHE = {ids:[], current:"", note:"", provName:""};
+function applyModelFilter(){
+  const sel = $("#setmodel"); if(!sel) return;
+  const q = ($("#modelfilter") ? $("#modelfilter").value : "").trim().toLowerCase();
+  const {ids, current, note, provName} = MODEL_SELECT_CACHE;
+  const shown = q ? ids.filter(id=>id.toLowerCase().includes(q)) : ids;
+  const list = shown.slice();
+  if(current && !list.includes(current)) list.unshift(current);
+  sel.innerHTML = list.map(id=>{
     const label = id.endsWith(":free") ? `FREE · ${id.replace(/:free$/,"")}` : id;
     return `<option value="${id}" ${id===current?"selected":""}>${label}</option>`;
   }).join("");
   sel.value = current;
-  $("#modelhint").textContent = note || `${ordered.length} models from ${prov.name}${free.length?` - ${free.length} free`:""}`;
+  const freeCount = shown.filter(id=>id.endsWith(":free")).length;
+  $("#modelhint").textContent = q
+    ? `${shown.length} of ${ids.length} models match "${q}"`
+    : (note || `${ids.length} models from ${provName}${freeCount?` - ${freeCount} free`:""}`);
 }
+if($("#modelfilter")) $("#modelfilter").addEventListener("input", applyModelFilter);
 function syncProviderUI(){
   const pv = $("#setprovider").value;
   const prov = PROVIDERS[pv] || PROVIDERS.openrouter;
@@ -2857,6 +2905,11 @@ function doLock(reason){
 })();
 async function finishBoot(){
   armIdleLock();
+  // first run on a fresh store: one welcome that says what this is and how to start
+  if(!S().chat.length && !getKey() && !S().settings.keyStored){
+    await addMsg("muse", "Welcome to Open Muse - a personal agent that belongs to you. Everything it learns lives in this browser (encrypt it with a passphrase in Settings), and nothing runs anywhere but this tab.\n\nTo wake it up:\n1. Open **Settings** (bottom of the left rail)\n2. Pick a model provider - **OpenRouter** has free models to start with, **Local** runs on your own machine with Ollama, **EDGE//AI** runs on-device in a hidden frame\n3. Paste a key (free at openrouter.ai/keys) and save\n\nThen just tell it what needs doing. Try: *my goal is to plan a weekend trip*.");
+    await Store.save();
+  }
   {
     const dead=S().memory.filter(m=>!memAlive(m));
     if(dead.length){
