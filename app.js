@@ -416,7 +416,15 @@ function renderChat(){
   log.scrollTop = log.scrollHeight;
 }
 function inlineMd(t){
-  return esc(t).replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>").replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\n/g,"<br>");
+  return esc(t)
+    .replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>")
+    .replace(/`([^`]+)`/g,"<code>$1</code>")
+    .replace(/^####\s+(.+?)\s*\n?$/gm,'<div class="mdh mdh4">$1</div>')
+    .replace(/^###\s+(.+?)\s*\n?$/gm,'<div class="mdh mdh3">$1</div>')
+    .replace(/^##\s+(.+?)\s*\n?$/gm,'<div class="mdh mdh2">$1</div>')
+    .replace(/^#\s+(.+?)\s*\n?$/gm,'<div class="mdh mdh1">$1</div>')
+    .replace(/^---+\s*\n?$/gm,'<hr class="mdhr">')
+    .replace(/\n/g,"<br>");
 }
 function mdLite(t){
   const re = /```([a-zA-Z]*)\n?([\s\S]*?)```/;
