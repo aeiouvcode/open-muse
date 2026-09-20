@@ -418,7 +418,7 @@ function renderChat(){
   log.scrollTop = log.scrollHeight;
 }
 function inlineMd(t){
-  return esc(t).replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>").replace(/`([^`]+)`/g,"<code>$1</code>");
+  return esc(t).replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>").replace(/\*([^*\n]+)\*/g,"<i>$1</i>").replace(/`([^`]+)`/g,"<code>$1</code>");
 }
 /* Block-level markdown for chat/plan/merge text: pipe tables, bullet and
    numbered lists, headings, rules. Code blocks are already carved out by
@@ -447,9 +447,10 @@ function blockMd(t){
       out.push('<ul class="mdlist">'+items.join("")+"</ul>"); continue;
     }
     if(isOl(l)){
+      const firstN=+(l.match(/^\s*(\d+)\./)||[0,1])[1];
       const items=[];
       while(i<lines.length && isOl(lines[i])) items.push("<li>"+inlineMd(lines[i++].replace(/^\s*\d+\.\s+/,""))+"</li>");
-      out.push('<ol class="mdlist">'+items.join("")+"</ol>"); continue;
+      out.push('<ol class="mdlist"'+(firstN>1?' start="'+firstN+'"':"")+'>'+items.join("")+"</ol>"); continue;
     }
     const hm=l.match(/^(#{1,4})\s+(.+?)\s*$/);
     if(hm){ out.push('<div class="mdh mdh'+hm[1].length+'">'+inlineMd(hm[2])+"</div>"); i++; continue; }
