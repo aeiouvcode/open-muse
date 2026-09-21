@@ -215,7 +215,13 @@ body.dock-collapsed .dock-mini{display:flex}
 aside.rail{display:none}
 aside.rail.open{display:flex;position:fixed;left:0;top:0;bottom:0;width:min(300px,84vw);z-index:60;box-shadow:0 0 60px #000c}
 #railbackdrop{position:fixed;inset:0;background:#060810aa;z-index:55;display:block}
-#menubtn{display:flex!important;align-items:center;justify-content:center;min-width:46px;min-height:46px;padding:10px;top:calc(10px + env(safe-area-inset-top))}
+#menubtn{display:flex!important;align-items:center;justify-content:center;min-width:44px;min-height:44px;padding:10px;top:calc(10px + env(safe-area-inset-top));background:transparent;border:none}
+/* mobile chrome: one calm row, no stacked bars */
+#mstrip{padding:5px var(--pad) 5px 64px;font-size:12px}
+#modebar{flex-wrap:nowrap;gap:8px}
+.modenote{display:none}
+#exportchatbtn{padding:8px 12px;font-size:12px;min-height:36px;flex:none}
+.msg{max-width:88%}
 /* fixed hamburger must never cover the mode bar or a view title */
 #modebar{padding-left:64px}
 .viewhead{padding-left:64px}
