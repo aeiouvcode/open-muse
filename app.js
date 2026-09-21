@@ -1457,7 +1457,7 @@ function syncProviderUI(){
   $("#keyhint").innerHTML = prov.edge
     ? 'the EDGE//AI app runs the model in a hidden frame on this device. <a href="https://aeiouvcode.github.io/edge-ai/" target="_blank" rel="noopener">Open EDGE//AI</a> to unlock it and load a chat model - Muse never downloads or switches models on its own.'
     : String(prov.hint||"").replace(/</g,"&lt;");
-  const isLocal = !!prov.local, isNim = !!prov.nim, keyless = isLocal || !!prov.edge;
+  const isLocal = !!prov.local, isNim = !!prov.nim, keyless = (isLocal || !!prov.edge) && !isNim;
   $("#localurlwrap").hidden = !(isLocal || isNim);
   if(isNim){
     $("#localurlwrap label").textContent = "NIM endpoint base URL";
@@ -1488,7 +1488,7 @@ $("#savesettings").addEventListener("click", async ()=>{
   S().settings.provider = pv;
   const isNim = pv==="nim";
   if(isLocal || isNim){
-    const dflt = isLocal ? "http://localhost:11434/v1" : "https://api.nvcf.nvidia.com/v1";
+    const dflt = isLocal ? "http://localhost:11434/v1" : "http://localhost:8000/v1";
     const base=$("#setlocalurl").value.trim() || dflt;
     if(!/^https?:\/\/[\w.:\/-]+$/.test(base)){ toast("Endpoint URL looks wrong - e.g. "+dflt); return; }
     if(isLocal) S().settings.localUrl = base; else S().settings.nimUrl = base;
