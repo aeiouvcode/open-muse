@@ -679,6 +679,7 @@ function friendlyModelError(e){
   if(code==="429") return "Rate limited (429) - too many requests right now. Give it a moment and try again.";
   if(code && code[0]==="5") return "The provider is having server trouble ("+code+"). Try again shortly.";
   if(/failed to fetch|networkerror|load failed/i.test(m)) return "Could not reach the model provider - network blocked or offline. OpenRouter and Token Harbor both allow direct browser calls, so this is usually connectivity.";
+  if(/^(Cannot read propert|undefined is not|null is not|.*is not a function)/.test(m)) return "Muse hit an internal bug, not something you did. The step stays open - say \u201cadvance\u201d to try again; if it repeats, the bug needs fixing, not retrying.";
   return "Model call failed: "+m.slice(0,140);
 }
 
