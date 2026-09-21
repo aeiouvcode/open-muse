@@ -19,7 +19,7 @@ const Store = {
   KEY: "openmuse.store.v1",
   default(){
     return {
-      settings: { provider: "openrouter", model: "", hasKey: false, saveKey: false, keyStored: "", mode: "agent", searchProvider: "tavily", searchKey: "", openNetwork: false, skillsOff: [], autonomy: true, theme: "serious", density: "comfortable", font: "m", statusStrip: true, localUrl: "http://localhost:11434/v1" },
+      settings: { provider: "gemini", model: "", hasKey: false, saveKey: false, keyStored: "", mode: "agent", searchProvider: "tavily", searchKey: "", openNetwork: false, skillsOff: [], autonomy: true, theme: "serious", density: "comfortable", font: "m", statusStrip: true, localUrl: "http://localhost:11434/v1" },
       cloak: { on: false, rules: [] },   // {id, real, twin, kind, auto, created} - twins never leave the device
       habits: [],        // {id,name,cadence:"daily"|"weekly",created,checks:[day-or-week keys]}
       chat: [],          // {role, text, ts, kind}
@@ -104,6 +104,8 @@ const S = () => Store.raw;
 
 /* model providers - OpenAI-compatible chat completions shape */
 const PROVIDERS = {
+  gemini:      { name:"Gemini",       url:"https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", nativeCatalog:"https://generativelanguage.googleapis.com/v1beta/models?pageSize=100&key=", defModel:"gemini-3.8-flash", keyPh:"AIza...", hint:"free key from aistudio.google.com/apikey - the most reliable free tier, called straight from this browser", hintHtml:'free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> - the most reliable free tier, called straight from this browser', authCatalog:true,
+                 fallback:["gemini-3.8-flash","gemini-3.7-flash","gemini-3.6-flash","gemini-3.5-flash","gemini-3.5-flash-lite","gemini-3-flash-preview","gemini-3.1-pro-preview","gemini-3-pro-preview","gemini-3.1-flash-lite","gemini-3.1-flash-lite-preview","gemini-2.5-pro","gemini-2.5-flash","gemini-2.5-flash-lite","gemini-2.5-flash-preview-09-2025","gemini-2.0-flash","gemini-2.0-flash-lite","gemini-flash-latest"] },
   openrouter:  { name:"OpenRouter",   url:"https://openrouter.ai/api/v1/chat/completions", modelsUrl:"https://openrouter.ai/api/v1/models", defModel:"openai/gpt-4o-mini",       keyPh:"sk-or-...",    hint:"key from openrouter.ai/keys",
                  fallback:["openai/gpt-4o-mini","openai/gpt-4o","anthropic/claude-sonnet-4.5","google/gemini-2.5-flash","deepseek/deepseek-chat-v3-0324"] },
   tokenharbor: { name:"Token Harbor", url:"https://tokenharbor.ai/v1/chat/completions",    modelsUrl:"https://tokenharbor.ai/v1/models",    defModel:"deepseek-v4.1-flash:free", keyPh:"thk_live_...", hint:"Universal Key from the tokenharbor.ai dashboard - :free models never charge", authCatalog:true,
@@ -235,7 +237,8 @@ function renderStatus(){
   $("#memcount").textContent = s.memory.length;
   const strip = $("#mstrip");
   if(strip){
-    strip.hidden = s.settings.statusStrip === false;
+    /* calm shell: the strip only earns its row when something is happening */
+    strip.hidden = s.settings.statusStrip === false || (!busy && pending===0);
     if(!strip.hidden){
       const queued = s.goals.flatMap(g=>g.plan.steps.filter(x=>x.status!=="done")).length;
       $("#ms-text").textContent = busy
@@ -365,12 +368,18 @@ function renderGoals(){
       }).join("")}</div>
       <div class="row">
         <button class="btn pri" data-advance="${g.id}" ${g.status==="done"?"disabled":""}>${g.status==="done"?"Complete":"Advance"}</button>
-        <button class="btn" data-tune="${g.id}">Tune</button>
-        <button class="btn" data-team="${g.id}|team">Team</button><button class="btn" data-team="${g.id}|swarm">Swarm</button><button class="btn" data-team="${g.id}|workforce">Workforce</button>
-        <button class="btn" data-discuss="${g.id}">Discuss</button><button class="btn badb" data-delgoal="${g.id}">Drop</button>
+        <button class="btn" data-discuss="${g.id}">Discuss</button>
+        <span class="gmenu"><button class="btn" data-goalmenu="${g.id}" aria-label="More actions for this goal">&#8943;</button><span class="gmenu-pop">
+          <button class="btn" data-tune="${g.id}">Tune</button>
+          <button class="btn" data-team="${g.id}|team">Team</button>
+          <button class="btn" data-team="${g.id}|swarm">Swarm</button>
+          <button class="btn" data-team="${g.id}|workforce">Workforce</button>
+          <button class="btn badb" data-delgoal="${g.id}">Drop</button>
+        </span></span>
       </div></div>`;
   }).join("");
   $$('[data-move]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); const [g,x,d]=b.dataset.move.split('|'); moveStep(g,x,+d); });
+  $$('[data-goalmenu]').forEach(b=>b.onclick=e=>{ e.stopPropagation(); const pop=b.parentElement.querySelector('.gmenu-pop'); const was=pop.classList.contains('open'); $$('.gmenu-pop.open').forEach(x=>x.classList.remove('open')); if(!was)pop.classList.add('open'); });
   let drag=null;
   $$('[data-dragstep]').forEach(el=>{
     el.ondragstart=()=>{ drag=el.dataset.dragstep; el.classList.add('dragging'); };
@@ -662,7 +671,9 @@ function getKey(){ return sessionStorage.getItem("openmuse.key") || (S() && S().
 /* human-readable model errors: never show raw provider JSON in chat */
 function friendlyModelError(e){
   const m = String(e && e.message || e);
-  if(m==="no-key") return "No model key set. Open Muse is BYO-key: paste a key in Settings (OpenRouter, Token Harbor or NVIDIA NIM) - it stays in this browser. Or pick the Local provider and run a model on this machine with no key at all.";
+  if(m==="no-key") return "No model key set. Open Muse is BYO-key: paste a key in Settings - Gemini\u2019s free tier (aistudio.google.com/apikey) is the easiest start, OpenRouter, Token Harbor and NVIDIA NIM work too - it stays in this browser. Or pick the Local provider and run a model on this machine with no key at all.";
+  if(m==="stall") return "The provider went quiet mid-reply - nothing came through for a while, so I stopped waiting instead of spinning forever. That usually means the model is overloaded right now: try again, or use the Test button in Settings to pick a model that answers.";
+  if(m==="model-empty") return "The provider answered but sent back no reply text - the model may be overloaded or it filtered the response. Try again, or pick another model in Settings.";
   if(m==="no-model") return provider().edge
     ? "No on-device model is loaded. Open EDGE//AI (aeiouvcode.github.io/edge-ai), load a chat model there, then come back - Muse never downloads or switches models on its own."
     : "No model selected. Open Settings and refresh the model list once your local server is up - or just type the model id (e.g. llama3.1:8b).";
@@ -672,14 +683,16 @@ function friendlyModelError(e){
   if(S() && provider().local && /failed to fetch|networkerror|load failed/i.test(m)) return "Could not reach the local model server at " + (S().settings.localUrl||"http://localhost:11434/v1") + ". Start Ollama (ollama serve) or LM Studio's server there, then try again. Nothing left this device.";
   const st = m.match(/\bmodel (\d{3})\b/) || m.match(/\b(401|402|403|404|408|409|429|5\d\d)\b/);
   const code = st ? st[1] : "";
+  if(code==="400") return /api key/i.test(m) ? "The provider says that key isn't valid (400). Re-check it in Settings - Gemini keys come from aistudio.google.com/apikey." : "The provider rejected the request (400) - the model id may not exist on this provider. Pick another model in Settings.";
   if(code==="401") return "The provider rejected the call as unauthenticated (401) - the key is missing, malformed or revoked. Check it in Settings, or switch provider.";
   if(code==="402") return "The provider says this key is out of credit (402). Top up, or switch to a free model.";
   if(code==="403") return "The provider refused this key (403) - it may not have access to that model. Check the key in Settings or pick another model.";
   if(code==="404") return "The provider does not recognize that model (404). Pick another model in Settings.";
   if(code==="429") return "Rate limited (429) - too many requests right now. Give it a moment and try again.";
   if(code && code[0]==="5") return "The provider is having server trouble ("+code+"). Try again shortly.";
-  if(/failed to fetch|networkerror|load failed/i.test(m)) return "Could not reach the model provider - network blocked or offline. OpenRouter and Token Harbor both allow direct browser calls, so this is usually connectivity.";
+  if(/failed to fetch|networkerror|load failed/i.test(m)) return "Could not reach the model provider - network blocked or offline. Gemini, OpenRouter and Token Harbor all allow direct browser calls, so this is usually connectivity.";
   if(/^(Cannot read propert|undefined is not|null is not|.*is not a function)/.test(m)) return "Muse hit an internal bug, not something you did. The step stays open - say \u201cadvance\u201d to try again; if it repeats, the bug needs fixing, not retrying.";
+  const mc=m.match(/^model (\d{3}):/); if(mc) return "The model call failed ("+mc[1]+"). Try again, or pick another model in Settings.";
   return "Model call failed: "+m.slice(0,140);
 }
 
@@ -696,30 +709,51 @@ async function chatStream(messages, onTok, signal){
   }
   const headers = { "Content-Type":"application/json" };
   if(key) headers["Authorization"] = "Bearer " + key;
-  const r = await fetch(ep.url, {
-    method:"POST",
-    headers,
-    signal: signal || undefined,
-    body: JSON.stringify({ model: activeModel(), messages, stream:true, temperature:0.7 })
-  });
-  if(!r.ok){ const t=await r.text(); throw new Error("model "+r.status+": "+t.slice(0,160)); }
+  // stall watchdog: the user stop signal is external; an inner controller lets
+  // us abort ourselves when the provider goes quiet (connects, then nothing)
+  const inner=new AbortController();
+  const onExt=()=>inner.abort();
+  if(signal){ if(signal.aborted) inner.abort(); else signal.addEventListener("abort", onExt); }
+  const t0=Date.now(); let lastByte=t0, gotText=false;
+  const watchdog=setInterval(()=>{
+    if(Date.now()-lastByte>45000 || (!gotText && Date.now()-t0>90000)) inner.abort("stall");
+  },2000);
+  let r;
+  try{
+    r = await fetch(ep.url, {
+      method:"POST",
+      headers,
+      signal: inner.signal,
+      body: JSON.stringify({ model: activeModel(), messages, stream:true, temperature:0.7 })
+    });
+  }catch(e){
+    clearInterval(watchdog); if(signal) signal.removeEventListener("abort", onExt);
+    if(signal && signal.aborted) throw e;
+    if(inner.signal.aborted) throw new Error("stall");
+    throw e;
+  }
+  if(!r.ok){ clearInterval(watchdog); if(signal) signal.removeEventListener("abort", onExt); const t=await r.text(); throw new Error("model "+r.status+": "+t.slice(0,160)); }
   const rd=r.body.getReader(); const dec=new TextDecoder(); let buf="", out="";
   try{
     for(;;){
       const {done,value}=await rd.read(); if(done) break;
+      lastByte=Date.now();
       buf+=dec.decode(value,{stream:true});
       let i; while((i=buf.indexOf("\n"))>=0){
         const line=buf.slice(0,i).trim(); buf=buf.slice(i+1);
         if(!line.startsWith("data:")) continue;
-        const d=line.slice(5).trim(); if(d==="[DONE]") return Cloak.back(out);
-        try{ const tok=JSON.parse(d).choices?.[0]?.delta?.content || ""; if(tok){ out+=tok; onTok && onTok(Cloak.back(out)); } }catch(e){}
+        const d=line.slice(5).trim(); if(d==="[DONE]"){ clearInterval(watchdog); if(signal) signal.removeEventListener("abort", onExt); return Cloak.back(out); }
+        try{ const tok=JSON.parse(d).choices?.[0]?.delta?.content || ""; if(tok){ gotText=true; out+=tok; onTok && onTok(Cloak.back(out)); } }catch(e){}
       }
     }
   }catch(e){
+    clearInterval(watchdog); if(signal) signal.removeEventListener("abort", onExt);
     // user pressed Stop: keep whatever streamed in, hand it back partial
     if(signal && signal.aborted) return Cloak.back(out);
+    if(inner.signal.aborted) throw new Error("stall");
     throw e;
   }
+  clearInterval(watchdog); if(signal) signal.removeEventListener("abort", onExt);
   return Cloak.back(out);
 }
 async function chatOnce(messages, json, model){
@@ -734,7 +768,10 @@ async function chatOnce(messages, json, model){
   if(key) headers["Authorization"] = "Bearer " + key;
   const r=await fetch(ep.url,{method:"POST",headers,body:JSON.stringify(body)});
   if(!r.ok) throw new Error("model "+r.status);
-  return Cloak.back((await r.json()).choices[0].message.content);
+  const j=await r.json();
+  const ch=j.choices && j.choices[0];
+  if(!ch || !ch.message || typeof ch.message.content!=="string") throw new Error("model-empty");
+  return Cloak.back(ch.message.content);
 }
 
 /* ---------------- AI SDK-shaped protocol ----------------
@@ -1131,12 +1168,10 @@ async function sendChat(auto){
     await Store.save(); renderAll(); return;
   }
 
-  // recall intent: answer from the memory list directly, no model call
-  if(/\bwhat do you (remember|know) about me\b/i.test(text)){
+  // recall intent: list real stored memories, framed honestly as local data
+  if(/\bwhat do you (remember|know) about me\b/i.test(text) && S().memory.length){
     const mem=S().memory;
-    await addMsg("muse", mem.length
-      ? "Here's what I'm holding:\n\n" + mem.slice(0,12).map(m=>"- "+m.text).join("\n") + "\n\nSay \"forget <thing>\" and it's gone."
-      : "Nothing yet. As we talk I'll keep the durable stuff - and you can see all of it in Memory.");
+    await addMsg("muse", "From local memory - stored on this device, no model involved:\n\n" + mem.slice(0,12).map(m=>"- "+m.text).join("\n") + "\n\nSay \"forget <thing>\" and it's gone.");
     await Store.save(); renderAll(); return;
   }
 
@@ -1145,9 +1180,20 @@ async function sendChat(auto){
     const open=S().tasks.filter(t=>t.status==="open");
     const rems=S().reminders.filter(r=>r.status==="pending");
     const active=S().goals.find(g=>g.status==="active");
-    await addMsg("muse", "On your plate:\n" + (open.length? open.map(t=>"- "+t.text).join("\n") : "- no open tasks")
-      + (active? `\n\nGoal in motion: "${active.title}" - say "advance" and I keep going.` : "")
-      + (rems.length? `\n\nReminders set: ${rems.map(r=>r.text+" ("+fmtD(r.at)+")").join(", ")}` : ""));
+    if(open.length || rems.length || active){
+      await addMsg("muse", "From your local board - no model involved:\n" + (open.length? open.map(t=>"- "+t.text).join("\n") : "- no open tasks")
+        + (active? `\n\nGoal in motion: "${active.title}" - say "advance" and I keep going.` : "")
+        + (rems.length? `\n\nReminders set: ${rems.map(r=>r.text+" ("+fmtD(r.at)+")").join(", ")}` : ""));
+      await Store.save(); renderAll(); return;
+    }
+  }
+
+  // honesty gate: without a model key nothing past here can work - say so
+  // plainly and point at the fix instead of pretending to answer.
+  const keylessProv = !!provider().local || !!provider().edge || !!provider().nim;
+  if(!getKey() && !keylessProv){
+    await addMsg("muse", "I can't answer that yet - there is no model connected, so anything I said would be fake. Paste a **Gemini** key in Settings and everything starts working for real: chat, goals, plans, memory. The key is free and stays in this browser.");
+    await addMsg("muse", `<div class="wactions"><button class="wchip" data-wa="settings">Set up a key</button><button class="wchip" data-wa="geminikey">Get a free Gemini key</button></div>`, "card");
     await Store.save(); renderAll(); return;
   }
 
@@ -1392,6 +1438,18 @@ async function fetchCatalog(pv){
   const prov = PROVIDERS[pv] || PROVIDERS.openrouter;
   const key = getKey();
   if(prov.authCatalog && !key) return null;   // TH/NIM catalogs are auth-gated
+  if(prov.nativeCatalog){
+    try{
+      const r = await fetch(prov.nativeCatalog + encodeURIComponent(key));
+      if(!r.ok) return null;
+      const j = await r.json();
+      const ids = (j.models||[])
+        .filter(m=>Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes("generateContent"))
+        .map(m=>String(m.name||"").replace(/^models\//,""))
+        .filter(id=>id && !/image|tts|transcribe|live|audio|embedding|aqa|omni|nano|computer-use|robotics/i.test(id));
+      return ids.length ? ids : null;
+    }catch(e){ return null; }
+  }
   const mu = prov.local ? provEndpoints().modelsUrl : prov.modelsUrl;
   try{
     const r = await fetch(mu, {headers: key ? {"Authorization":"Bearer "+key} : {}});
@@ -1402,6 +1460,7 @@ async function fetchCatalog(pv){
   }catch(e){ return null; }
 }
 async function populateModelSelect(){
+  let fallbackOrder = false;
   const pv = $("#setprovider").value;
   const prov = PROVIDERS[pv] || PROVIDERS.openrouter;
   const sel = $("#setmodel");
@@ -1429,13 +1488,15 @@ async function populateModelSelect(){
     else note = ids.length + " model" + (ids.length===1?"":"s") + " served locally - prompts never leave this device";
   } else {
     $("#setmodelcustom").hidden = true;
-    if(!ids){ ids = prov.fallback.slice(); note = prov.authCatalog && !getKey() ? "enter a key to load the full catalog - showing common models meanwhile" : "catalog unavailable - showing common models"; }
+    if(!ids){ ids = prov.fallback.slice(); fallbackOrder = true; note = prov.authCatalog && !getKey() ? "enter a key to load the full catalog - showing current models meanwhile" : "catalog unavailable - showing current models"; }
   }
   if(prov.nim){ $("#setmodelcustom").hidden = false; }
-  // free models to the top, FREE-marked (Token Harbor convention), rest alphabetical
-  const free = ids.filter(id=>id.endsWith(":free")).sort();
-  const paid = ids.filter(id=>!id.endsWith(":free")).sort();
-  const ordered = [...free, ...paid];
+  // verified-working on this provider+key first, then :free, rest alphabetical
+  const ver=(S().settings.verified||{})[pv]||{};
+  const okIds = ids.filter(id=>ver[id]!=null).sort((x,y)=>ver[x]-ver[y]);
+  const free = ids.filter(id=>ver[id]==null && id.endsWith(":free")).sort();
+  const paid = ids.filter(id=>ver[id]==null && !id.endsWith(":free")).sort();
+  const ordered = fallbackOrder ? ids.slice() : [...okIds, ...free, ...paid];
   if(current && !ordered.includes(current)) ordered.unshift(current);
   MODEL_SELECT_CACHE.ids = ordered; MODEL_SELECT_CACHE.current = current; MODEL_SELECT_CACHE.note = note; MODEL_SELECT_CACHE.provName = prov.name;
   applyModelFilter();
@@ -1448,8 +1509,10 @@ function applyModelFilter(){
   const shown = q ? ids.filter(id=>id.toLowerCase().includes(q)) : ids;
   const list = shown.slice();
   if(current && !list.includes(current)) list.unshift(current);
+  const verMap=(S().settings.verified||{})[($("#setprovider")||{}).value]||{};
   sel.innerHTML = list.map(id=>{
-    const label = id.endsWith(":free") ? `FREE · ${id.replace(/:free$/,"")}` : id;
+    const base = id.endsWith(":free") ? `FREE · ${id.replace(/:free$/,"")}` : id;
+    const label = verMap[id]!=null ? `\u2713 ${base} · answered in ${verMap[id]} ms` : base;
     return `<option value="${id}" ${id===current?"selected":""}>${label}</option>`;
   }).join("");
   sel.value = current;
@@ -1459,11 +1522,64 @@ function applyModelFilter(){
     : (note || `${ids.length} models from ${provName}${freeCount?` - ${freeCount} free`:""}`);
 }
 if($("#modelfilter")) $("#modelfilter").addEventListener("input", applyModelFilter);
+function mtReason(st){ return {400:"key or request rejected",401:"key rejected",402:"out of credit / quota",403:"no permission for this model",404:"retired or unknown here",408:"timed out",409:"conflict",429:"rate limited - retry later"}[st] || (st>=500?"provider server trouble ("+st+")":"failed ("+st+")"); }
+$("#testmodels").addEventListener("click", async ()=>{
+  const pv=$("#setprovider").value; const prov=PROVIDERS[pv]||PROVIDERS.openrouter;
+  const box=$("#modeltest");
+  if(prov.edge){ box.innerHTML=`<div class="small" style="color:var(--dim);margin-top:8px">On-device models load one at a time inside EDGE//AI - test them there instead.</div>`; return; }
+  const keyless=!!prov.local||!!prov.nim;
+  if(!getKey() && !keyless){ box.innerHTML=`<div class="small" style="color:var(--dim);margin-top:8px">Paste your key above and Save first - then the tester can show what it actually reaches.</div>`; return; }
+  const ids=(MODEL_SELECT_CACHE.ids||[]).filter(Boolean);
+  const q=($("#modelfilter").value||"").trim().toLowerCase();
+  const list=q?ids.filter(id=>id.toLowerCase().includes(q)):ids;
+  if(!list.length){ box.innerHTML=`<div class="small" style="color:var(--dim);margin-top:8px">No models listed - press ↻ to load the catalog first.</div>`; return; }
+  const ep=provEndpoints();
+  box.innerHTML=`<div class="small" id="mtsum" style="color:var(--dim);margin:8px 0 6px">Probing ${list.length} model${list.length===1?"":"s"} with one-token replies - cheap, and done in a few seconds.</div>`
+    + list.map(id=>`<div class="mtrow" data-mt="${esc(id)}"><span class="mtst"><i class="spin"></i></span><span class="mtid">${esc(id)}</span><span class="mtms"></span><span class="mtuse"></span></div>`).join("");
+  const sum=box.querySelector("#mtsum");
+  let done=0, pass=0;
+  const probe=async(id)=>{
+    const row=box.querySelector(`[data-mt="${CSS.escape(id)}"]`);
+    const t0=performance.now();
+    const ctl=new AbortController(); const to=setTimeout(()=>ctl.abort(),20000);
+    let st;
+    try{
+      const headers={"Content-Type":"application/json"}; const k=getKey(); if(k) headers["Authorization"]="Bearer "+k;
+      const r=await fetch(ep.url,{method:"POST",headers,signal:ctl.signal,body:JSON.stringify({model:id,messages:[{role:"user",content:"Say OK"}],max_tokens:1,temperature:0})});
+      const ms=Math.round(performance.now()-t0);
+      if(r.ok){ const j=await r.json().catch(()=>null); st=(j&&Array.isArray(j.choices)&&j.choices.length)?{ok:true,ms}:{ok:false,why:"answered but sent no text"}; }
+      else st={ok:false,why:mtReason(r.status)};
+    }catch(e){ st={ok:false,why:ctl.signal.aborted?"timed out (20s)":(/failed to fetch|networkerror|load failed/i.test(String(e))?"unreachable from this browser":"probe error")}; }
+    clearTimeout(to);
+    done++; if(st.ok)pass++;
+    if(sum) sum.textContent=`Probing ${list.length} model${list.length===1?"":"s"} - ${done} done, ${pass} answering so far.`;
+    if(row){
+      const stEl=row.querySelector(".mtst"); stEl.textContent=st.ok?"✓":"✕"; stEl.className="mtst "+(st.ok?"ok":"bad");
+      row.querySelector(".mtms").textContent=st.ok?st.ms+" ms":st.why;
+      if(st.ok){ const u=document.createElement("button"); u.className="btn mtusebtn"; u.textContent="Use";
+        u.onclick=()=>{ S().settings.model=id; Store.save().then(()=>{ MODEL_SELECT_CACHE.current=id; populateModelSelect(); renderStatus(); }); audit("settings","Picked model "+id+" from the tester"); toast("Model set to "+id+"."); };
+        row.querySelector(".mtuse").appendChild(u); }
+    }
+    return st;
+  };
+  const queue=list.slice();
+  const passed={};
+  await Promise.all(Array.from({length:Math.min(6,queue.length)},async()=>{ while(queue.length){ const id=queue.shift(); const st=await probe(id); if(st&&st.ok) passed[id]=st.ms; } }));
+  // remember what verifiably answers on this provider+key; the model list
+  // floats those to the top so a working model is always one glance away
+  const st=S().settings; st.verified=st.verified||{}; const v=Object.assign({}, st.verified[pv]);
+  for(const id of list) delete v[id];
+  Object.assign(v, passed);
+  st.verified[pv]=v; await Store.save();
+  populateModelSelect();
+  if(sum) sum.textContent=`${pass} of ${list.length} models answered with ${keyless?"this endpoint":"your key"}. Passes show latency; tap Use to pick one.`;
+  audit("settings",`Model tester: ${pass}/${list.length} answered on ${prov.name}`);
+});
 function syncProviderUI(){
   const pv = $("#setprovider").value;
   const prov = PROVIDERS[pv] || PROVIDERS.openrouter;
   $("#setkey").placeholder = prov.keyPh;
-  $("#keyhint").innerHTML = prov.edge
+  $("#keyhint").innerHTML = prov.hintHtml ? prov.hintHtml : prov.edge
     ? 'the EDGE//AI app runs the model in a hidden frame on this device. <a href="https://aeiouvcode.github.io/edge-ai/" target="_blank" rel="noopener">Open EDGE//AI</a> to unlock it and load a chat model - Muse never downloads or switches models on its own.'
     : String(prov.hint||"").replace(/</g,"&lt;");
   const isLocal = !!prov.local, isNim = !!prov.nim, keyless = (isLocal || !!prov.edge) && !isNim;
@@ -1493,6 +1609,7 @@ $("#refreshmodels").addEventListener("click", populateModelSelect);
 $("#savesettings").addEventListener("click", async ()=>{
   const k=$("#setkey").value.trim(), m=$("#setmodel").value, p=$("#setpass").value;
   const pv=$("#setprovider").value, remember=$("#setsavekey").checked;
+  let modelNote="";
   const isLocal = pv==="local";
   S().settings.provider = pv;
   const isNim = pv==="nim";
@@ -1513,6 +1630,19 @@ $("#savesettings").addEventListener("click", async ()=>{
   if(chosen && !/^[\w.:/-]{1,100}$/.test(chosen)){ toast("Model id has invalid characters."); return; }
   S().settings.model = chosen;  // blank = provider default
   if(isLocal || isNim) $("#setmodelcustom").value = "";
+  // with a fresh key, trust the provider's live catalog over any remembered or
+  // fallback model id - ids get retired, the catalog knows what exists today
+  if(k && !isLocal && !isNim && pv!=="edge"){
+    const ids = await fetchCatalog(pv);
+    if(ids && ids.length){
+      const cur = S().settings.model || PROVIDERS[pv].defModel;
+      if(!ids.includes(cur)){
+        const pick = ids.find(id=>/flash/i.test(id)) || ids[0];
+        S().settings.model = pick;
+        modelNote = " Model set to " + pick + " from the provider's live catalog.";
+      }
+    }
+  }
   if(p){
     if(p.length < 8){ toast("Passphrase needs at least 8 characters."); return; }
     $("#setpass").value = "";
@@ -1520,7 +1650,7 @@ $("#savesettings").addEventListener("click", async ()=>{
   $("#setkey").value = "";
   await Store.save(); renderStatus();
   await audit("settings","Settings updated");
-  toast("Saved.");
+  toast("Saved." + modelNote);
 });
 $("#ms-close").addEventListener("click", async ()=>{ S().settings.statusStrip=false; await Store.save(); renderStatus(); toast("Status strip hidden - turn it back on in Settings."); });
 $("#setstrip").addEventListener("change", async ()=>{ S().settings.statusStrip = $("#setstrip").checked; await Store.save(); renderStatus(); });
@@ -1660,7 +1790,7 @@ ${S().coder&&S().coder.planMode ? "- PLAN MODE IS ON. Inspect and reason only. D
 - Code goes in fenced blocks with the language (\`\`\`js, \`\`\`html, \`\`\`css). When editing existing code, produce a unified diff in a \`\`\`diff block (+ / - / @@ lines) against the source below.
 - Review your own diff before finishing: one short paragraph on risks and what to test. Suggest the Self-tests button after any change.
 Honesty rules:
-- You CANNOT apply changes. A static page cannot rewrite its deployed code. When a patch is ready, offer: "Turn this into an Evolve proposal?" - proposals pass hard gates and the user's approval, then export as a patch bundle or hand to Instinct.
+- You CANNOT apply changes. A static page cannot rewrite its deployed code. When a patch is ready, offer: "Turn this into an Evolve proposal?" - proposals pass hard gates and the user's approval, then export as a patch bundle or hand to your agent.
 - Never invent files or features not in the source below. No external services beyond openrouter.ai and tokenharbor.ai. Never include API keys, tokens or secrets.
 Style: clipped, precise, engineer-to-engineer. Short prose; the code does the talking.
 CURRENT APP SOURCE:
@@ -1729,7 +1859,7 @@ $("#codercompact").onclick=compactCoderContext;
    Proposal-and-approve, honestly: Muse drafts a concrete improvement with
    the model, hard gates evaluate it, the human decides. A static Pages app
    cannot rewrite itself, so approval yields a patch bundle download or a
-   structured hand-off to Instinct. Failed attempts stay logged. */
+   structured hand-off to the user's agent. Failed attempts stay logged. */
 const EVOLVE_ENGINE = "deepseek-v4.1-flash:free";   // Token Harbor :free route - the loop engine
 /* Self-knowledge: what Open Muse ALREADY does. The evolve engine only ever saw
    a one-line app description, so it kept proposing features that exist (it once
@@ -1749,15 +1879,15 @@ const APP_CAPABILITIES = [
   "Approvals: Sentinel pauses sensitive steps; approval cards persist resolved state across reloads",
   "Personal VM: local IndexedDB store, optional AES-GCM at rest with PBKDF2 passphrase, 15-minute idle auto-lock, manual Lock now, encrypted export/import, full wipe",
   "Appearance: four themes (serious/violet/ember/paper), density, font size - user-selectable in Settings",
-  "Model providers: OpenRouter, Token Harbor (live catalog with free-model listing, key in session or encrypted on device), and Local - Ollama/LM Studio over a user-set localhost OpenAI-compatible endpoint, no key, prompts never leave the device",
+  "Model providers: Gemini (free tier, browser-direct OpenAI-compatible endpoint), OpenRouter, Token Harbor (live catalog with free-model listing, key in session or encrypted on device), and Local - Ollama/LM Studio over a user-set localhost OpenAI-compatible endpoint, no key, prompts never leave the device",
   "Privacy cloak: optional AgentCloak-style layer - before any outbound model call, structured PII (emails, phones, card/ID numbers) is auto-detected and user-taught values are swapped for consistent synthetic twins; replies are un-swapped before display; twins stored locally/encrypted, audit logs counts only",
   "On-device engine: EDGE//AI bridge - sibling static app (same origin) runs inference in a hidden frame over postMessage RPC, no key, offline after model download",
   "Habits: daily/weekly habits with check-ins and honest streaks (a missed period resets the count, no freebies), due pill in nav, evening proactive nudge, ISO-week buckets for weekly habits",
-  "Evolve itself: proposal drafting, hard gates (storage + encryption roundtrip, key configured, schema, size, app-file targets, secret scan, external-call allowlist), approve/reject with persistence, patch-bundle export, handoff to Instinct",
+  "Evolve itself: proposal drafting, hard gates (storage + encryption roundtrip, key configured, schema, size, app-file targets, secret scan, external-call allowlist), approve/reject with persistence, patch-bundle export, handoff to your agent",
   "Mobile layout: hamburger nav, safe-area composer, dismissible status strip showing working state and queue",
   "Proactivity: stale-step follow-ups and suggestions surfaced in chat"
 ];
-const EVOLVE_HOSTS = ["openrouter.ai","tokenharbor.ai"];
+const EVOLVE_HOSTS = ["openrouter.ai","tokenharbor.ai","generativelanguage.googleapis.com"];
 const EVO_SECRET_RES = [ /thk_live_[A-Za-z0-9]{6,}/, /sk-or-[A-Za-z0-9._-]{6,}/, /\bsk-[A-Za-z0-9]{20,}/, /gh[pousr]_[A-Za-z0-9]{20,}/, /github_pat_[A-Za-z0-9_]{20,}/, /BEGIN [A-Z ]*PRIVATE KEY/, /(?:password|passwd|api[_-]?key|secret)\s*[:=]\s*["'][^"'\s]{8,}/i ];
 
 async function runSelfTests(){
@@ -1821,7 +1951,7 @@ async function draftEvolution(ask){
   try{
     const engine = S().settings.provider==="tokenharbor" ? EVOLVE_ENGINE : activeModel();
     const raw = await chatOnce([
-      {role:"system",content:`You are the self-improvement engine of Open Muse - an open-source, local-first personal agent web app, three static files: index.html (UI shell), styles.css (dark refined theme), app.js (all logic: local store with optional AES-GCM encryption, chat, goals/plans, memory, audit trail, permissions model, model providers OpenRouter + Token Harbor, coder mode, this evolve module).
+      {role:"system",content:`You are the self-improvement engine of Open Muse - an open-source, local-first personal agent web app, three static files: index.html (UI shell), styles.css (dark refined theme), app.js (all logic: local store with optional AES-GCM encryption, chat, goals/plans, memory, audit trail, permissions model, model providers Gemini + OpenRouter + Token Harbor, coder mode, this evolve module).
 Open Muse ALREADY HAS these capabilities - never propose any of them, a rename/restyle of them, or a near-duplicate:
 ${APP_CAPABILITIES.map(c=>"- "+c).join("\n")}
 If the user's ask is already covered by the list, do NOT draft a proposal for it; instead title the proposal "Already shipped: <capability>" and use the rationale to point at the existing feature.
@@ -1878,7 +2008,7 @@ async function downloadBundle(id){
   await audit("evolve", `Patch bundle downloaded: "${e.title}"`);
 }
 
-async function instinctHandoff(id){
+async function agentHandoff(id){
   const e = S().evolutions.find(x=>x.id===id); if(!e) return;
   const g = e.eval ? e.eval.gates : [];
   const msg = `Open Muse improvement - I approved it in the app, please apply it.
@@ -1893,10 +2023,10 @@ Test plan: ${e.testPlan.join("; ") || "-"}
 Please review, apply to aeiouvcode/open-muse, re-run the secret scan, deploy, and verify live before calling it done.`;
   let copied = false;
   try{ await navigator.clipboard.writeText(msg); copied = true; }catch(e2){}
-  openModal(`<h3>Hand this to Instinct</h3><div class="sub">${copied ? "Copied to your clipboard. " : ""}Paste this to Instinct in your chat - it reviews, applies, tests and redeploys. Nothing changes until it reports back.</div>
+  openModal(`<h3>Hand this to your agent</h3><div class="sub">${copied ? "Copied to your clipboard. " : ""}Paste this to your agent in chat - it reviews, applies, tests and redeploys. Nothing changes until it reports back.</div>
     <textarea readonly style="width:100%;min-height:220px;font-size:12px">${esc(msg)}</textarea>
     <div class="row"><button class="btn modal-cancel">Done</button></div>`);
-  await audit("evolve", `Proposal handed to Instinct: "${e.title}"`);
+  await audit("evolve", `Proposal handed to your agent: "${e.title}"`);
 }
 
 function renderEvolutions(){
@@ -1919,7 +2049,7 @@ function renderEvolutions(){
     let btns = "";
     if(e.status==="draft" || e.status==="failed") btns += `<button class="btn" data-evoeval="${e.id}">${e.status==="failed"?"Re-run gates":"Run gates"}</button>`;
     if(e.status==="evaluated") btns += `<button class="btn okb" data-evoapp="${e.id}">Approve</button><button class="btn badb" data-evorej="${e.id}">Reject</button>`;
-    if(e.status==="approved") btns += `<button class="btn pri" data-evodl="${e.id}">Download patch bundle</button><button class="btn" data-evoinst="${e.id}">Hand to Instinct</button>`;
+    if(e.status==="approved") btns += `<button class="btn pri" data-evodl="${e.id}">Download patch bundle</button><button class="btn" data-evoinst="${e.id}">Hand to your agent</button>`;
     btns += `<button class="btn" data-evodel="${e.id}">Remove</button>`;
     return `<div class="evo">
       <h3><span class="pill ${pillCls}"><span class="d"></span>${e.status}</span> ${esc(e.title)}</h3>
@@ -1935,7 +2065,7 @@ function renderEvolutions(){
   $$("#evolist [data-evoapp]").forEach(b=>b.onclick=()=>decideEvolution(b.dataset.evoapp, true));
   $$("#evolist [data-evorej]").forEach(b=>b.onclick=()=>decideEvolution(b.dataset.evorej, false));
   $$("#evolist [data-evodl]").forEach(b=>b.onclick=()=>downloadBundle(b.dataset.evodl));
-  $$("#evolist [data-evoinst]").forEach(b=>b.onclick=()=>instinctHandoff(b.dataset.evoinst));
+  $$("#evolist [data-evoinst]").forEach(b=>b.onclick=()=>agentHandoff(b.dataset.evoinst));
   $$("#evolist [data-evodel]").forEach(b=>b.onclick=async ()=>{ const i=S().evolutions.findIndex(x=>x.id===b.dataset.evodel); if(i>=0){ S().evolutions.splice(i,1); await Store.save(); renderEvolutions(); } });
 }
 $("#evodraft").addEventListener("click", ()=>draftEvolution($("#evoask").value.trim().slice(0,1000)));
@@ -2956,7 +3086,8 @@ async function finishBoot(){
   armIdleLock();
   // first run on a fresh store: one welcome that says what this is and how to start
   if(!S().chat.length && !getKey() && !S().settings.keyStored){
-    await addMsg("muse", "Welcome to Open Muse - a personal agent that belongs to you. Everything it learns lives in this browser (encrypt it with a passphrase in Settings), and nothing runs anywhere but this tab.\n\nTo wake it up:\n1. Open **Settings** (bottom of the left rail)\n2. Pick a model provider - **OpenRouter** has free models to start with, **Local** runs on your own machine with Ollama, **EDGE//AI** runs on-device in a hidden frame\n3. Paste a key (free at openrouter.ai/keys) and save\n\nThen just tell it what needs doing. Try: *my goal is to plan a weekend trip*.");
+    await addMsg("muse", "Welcome to Open Muse - a personal agent that belongs to you. Everything it learns lives in this browser (encrypt it in Settings), and nothing runs anywhere but this tab.\n\nGive it a brain and it starts working: paste a **Gemini** key (free at aistudio.google.com/apikey - the most reliable free tier), pick **Local** with Ollama on this machine, or **EDGE//AI** on-device.");
+    await addMsg("muse", `<div class="wactions"><button class="wchip" data-wa="settings">Set up a key</button><button class="wchip" data-wa="goal">Try: plan a weekend trip</button><button class="wchip" data-wa="recall">What do you remember?</button></div>`, "card");
     await Store.save();
   }
   {
@@ -3015,3 +3146,49 @@ async function finishBoot(){
 }
 
 
+
+/* ---------------- welcome quick actions ---------------- */
+document.addEventListener("click", e=>{
+  const b = e.target && e.target.closest ? e.target.closest("[data-wa]") : null;
+  if(!b) return;
+  const a=b.dataset.wa;
+  if(a==="settings"){ switchView("settings"); }
+  else if(a==="goal"){ const ta=$("#chatinput"); ta.value="my goal is to plan a weekend trip"; ta.focus(); }
+  else if(a==="recall"){ sendChat({text:"what do you remember about me?", origin:"welcome-chip"}); }
+  else if(a==="geminikey"){ window.open("https://aistudio.google.com/apikey","_blank","noopener"); }
+});
+
+/* ---------------- tactile: pointer tilt on physical cards ---------------- */
+(function(){
+  if(matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if(matchMedia("(pointer: coarse)").matches) return;
+  let cur=null;
+  const reset=()=>{ if(cur){ cur.classList.remove("tilt"); cur.style.removeProperty("--rx"); cur.style.removeProperty("--ry"); cur=null; } };
+  document.addEventListener("pointermove", e=>{
+    const card = e.target && e.target.closest ? e.target.closest(".goal,.suggest") : null;
+    if(card!==cur){ reset(); cur=card; }
+    if(!card) return;
+    const r=card.getBoundingClientRect();
+    if(!r.width || !r.height) return;
+    const px=(e.clientX-r.left)/r.width-.5, py=(e.clientY-r.top)/r.height-.5;
+    card.classList.add("tilt");
+    card.style.setProperty("--ry",(px*4.5).toFixed(2)+"deg");
+    card.style.setProperty("--rx",(-py*4.5).toFixed(2)+"deg");
+  }, {passive:true});
+  document.addEventListener("pointerout", e=>{ if(cur && !e.relatedTarget) reset(); }, true);
+  document.addEventListener("pointerdown", reset, true);
+
+  /* magnetic Send: leans a few px toward the pointer, springs back */
+  const send=document.getElementById("sendbtn");
+  if(send){
+    send.addEventListener("pointermove", e=>{
+      const r=send.getBoundingClientRect();
+      const dx=e.clientX-(r.left+r.width/2), dy=e.clientY-(r.top+r.height/2);
+      send.style.transform=`translate(${(dx*.08).toFixed(1)}px, ${(dy*.12).toFixed(1)}px)`;
+    });
+    send.addEventListener("pointerleave", ()=>{ send.style.transform=""; });
+  }
+})();
+
+/* close goal overflow menus on any outside click */
+document.addEventListener('click',()=>{ $$('.gmenu-pop.open').forEach(x=>x.classList.remove('open')); });
