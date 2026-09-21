@@ -1045,7 +1045,7 @@ async function runStep(g, step){
   }catch(e){
     step.status="todo";
     setRT({last:"Failed: "+step.title.slice(0,60)});
-    await addMsg("sys", `Step “${step.title}” hit a problem: ${e.message==="no-key"?"no model key set - add it in Settings":e.message}`);
+    await addMsg("sys", `Step “${step.title}” hit a problem: ${friendlyModelError(e)}`);
     await audit("error",`Step failed: "${step.title}" (${e.message})`);
   }
   g.status = g.plan.steps.every(x=>x.status==="done") ? "done" : "active";
