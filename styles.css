@@ -455,5 +455,7 @@ body.agent-busy #mstrip .ms-dot{background:var(--acc2);animation:st-pulse 1.5s v
 .msg .meta{position:relative}
 .msgcopy{border:0;background:none;color:var(--dim2);font:inherit;font-size:10px;cursor:pointer;opacity:.55;padding:0 2px}
 .msgcopy:hover{opacity:1;text-decoration:underline}
+.msgretry{border:0;background:none;color:var(--dim2);font:inherit;font-size:10px;cursor:pointer;opacity:.55;padding:0 2px}
+.msgretry:hover{opacity:1;text-decoration:underline}
 .msg .body a{color:var(--acc,#b3541e)}
 #stopbtn{background:var(--bad,#c0392b);color:#fff}
