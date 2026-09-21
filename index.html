@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Open Muse - a personal agent that belongs to you</title>
 <meta name="description" content="Open Muse is an open-source, local-first personal AI agent: goals to plans, approvals, memory, audit trail and a private local vault. Your machine, your rules.">
-<link rel="stylesheet" href="styles.css?v=design-21sep2">
+<link rel="stylesheet" href="styles.css?v=202609220042">
 </head>
 <body>
 <button id="menubtn" title="Menu">☰</button>
@@ -73,7 +73,7 @@
       </div>
       <div id="chatlog"></div>
       <div id="composer">
-        <textarea id="chatinput" placeholder="Tell Muse what needs to get done...  (try: 'my goal is to run a 10k in 10 weeks')" rows="1"></textarea>
+        <textarea id="chatinput" placeholder="Tell Muse what needs to get done..." rows="1"></textarea>
         <button id="stopbtn" hidden title="Stop the reply">Stop</button>
         <button id="sendbtn">Send</button>
       </div>
@@ -194,7 +194,7 @@
     <!-- SETTINGS -->
     <section class="view" id="view-evolve">
       <div class="viewhead"><div><h2>Evolve</h2>
-        <div class="sub">Recursive self-improvement - Muse drafts a proposal, hard gates evaluate it, you approve or reject. A static page cannot rewrite its own code, so an approved proposal exports as a patch bundle or hands off to Instinct. It never self-applies.</div></div></div>
+        <div class="sub">Recursive self-improvement - Muse drafts a proposal, hard gates evaluate it, you approve or reject. A static page cannot rewrite its own code, so an approved proposal exports as a patch bundle or hands off to your agent. It never self-applies.</div></div></div>
       <div class="viewbody">
         <div class="evobox">
           <textarea id="evoask" placeholder="What should Muse improve about itself? (blank = Muse picks the highest-value fix)" rows="2"></textarea>
@@ -213,6 +213,7 @@
       <div class="viewbody" style="max-width:640px">
         <div class="field"><label>Model provider</label>
           <select id="setprovider">
+            <option value="gemini">Gemini (recommended - free tier)</option>
             <option value="openrouter">OpenRouter</option>
             <option value="tokenharbor">Token Harbor</option>
             <option value="nim">NVIDIA NIM</option>
@@ -233,9 +234,11 @@
             <input id="modelfilter" placeholder="filter models..." style="width:120px" title="Narrow the model list">
             <select id="setmodel" style="flex:1"></select>
             <button class="btn" id="refreshmodels" title="Reload the provider catalog">↻</button>
+            <button class="btn" id="testmodels" title="Probe every listed model with a one-token reply">Test</button>
           </div>
           <div class="small" id="modelhint" style="font-size:11.5px;color:var(--dim2);margin-top:4px"></div>
-          <input id="setmodelcustom" placeholder="or type a model id - e.g. llama3.1:8b" autocomplete="off" spellcheck="false" style="margin-top:6px" hidden></div>
+          <input id="setmodelcustom" placeholder="or type a model id - e.g. llama3.1:8b" autocomplete="off" spellcheck="false" style="margin-top:6px" hidden>
+          <div id="modeltest"></div></div>
         <div class="field"><label>Personal VM passphrase (optional - encrypts local storage with a key only you hold)</label>
           <input type="password" id="setpass" autocomplete="new-password" placeholder="leave blank to keep storage unencrypted"></div>
         <div class="field"><label style="display:flex;gap:9px;align-items:center;font-size:13px"><input type="checkbox" id="cloakon" style="width:auto"><span>Privacy cloak - swap private data for synthetic twins before anything leaves this browser</span></label>
@@ -299,7 +302,7 @@
 <!-- modal -->
 <div id="modalwrap"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
-<script src="app.js?v=design-21sep1"></script>
+<script src="app.js?v=202609220042"></script>
 </body>
 </html>
 
