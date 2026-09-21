@@ -403,13 +403,21 @@ function addMsg(role, text, kind){
 function renderChat(){
   const s=S(); if(!s) return;
   const log=$("#chatlog");
+  const lastUserMi = s.chat.reduce((a,m,i)=>m.role==="user"&&!m.kind?i:a, -1);
   log.innerHTML = s.chat.map((m,mi) => {
     if(m.kind==="card") return m.text;   // pre-rendered card html (approval/suggestion cards render live below)
     if(m.kind==="tool"){ const [t,r]=m.text.split("|||"); return `<div class="toolcard"><b>⚙ ${esc(t)}</b><div class="res">${esc(r)}</div></div>`; }
     const cls = (m.role==="user" ? "user" : m.role==="sys" ? "sys" : "muse") + (m.kind==="checkpoint" ? " checkpoint" : "");
     const body = m.role==="muse" ? mdLite(m.text) : esc(m.text);
-    return `<div class="msg ${cls}"><div class="body">${body}</div><div class="meta">${fmtT(m.ts)} <button class="msgcopy" data-mi="${mi}" title="Copy message">copy</button></div></div>`;
+    const retry = mi===lastUserMi ? ` <button class="msgretry" data-mi="${mi}" title="Send this again - drops everything after it">retry</button>` : "";
+    return `<div class="msg ${cls}"><div class="body">${body}</div><div class="meta">${fmtT(m.ts)} <button class="msgcopy" data-mi="${mi}" title="Copy message">copy</button>${retry}</div></div>`;
   }).join("");
+  $$("#chatlog .msgretry").forEach(b=>b.onclick=async()=>{
+    const mi=+b.dataset.mi, m=S().chat[mi]; if(!m||m.role!=="user") return;
+    const text=m.text;
+    S().chat.splice(mi); await Store.save(); renderChat();
+    sendChat({text, origin:"retry"});
+  });
   $$("#chatlog .msgcopy").forEach(b=>b.onclick=async()=>{ const m=S().chat[+b.dataset.mi]; if(!m) return; try{ await navigator.clipboard.writeText(m.text); b.textContent="copied"; setTimeout(()=>b.textContent="copy",1200); }catch(e){ toast("Copy failed - select the text manually."); } });
   // live approval cards
   s.goals.forEach(g => g.plan.steps.forEach(x => {
@@ -1584,6 +1592,19 @@ $("#newgoalbtn").addEventListener("click", ()=>{
   $("#gogoal").onclick=async ()=>{ const v=$("#ngoal").value.trim(); if(!v)return; const note=$("#nsteer").value.trim(),due=$("#ndue").value; closeModal(); await createGoal(v.charAt(0).toUpperCase()+v.slice(1),{note,due}); };
 });
 $("#exportmd").onclick=async()=>{ downloadText("open-muse-goals.md","text/markdown",goalsMarkdown()); await audit("goal","Exported goals as Markdown"); toast("Markdown export downloaded."); };
+$("#exportchatbtn").onclick=async()=>{
+  const s=S(); if(!s) return;
+  if(!s.chat.length){ toast("Nothing to export yet - say something first."); return; }
+  const lines=["# Open Muse conversation","","Exported "+new Date().toLocaleString()+". This file came from your browser - it was never sent anywhere.","","---",""];
+  s.chat.forEach(m=>{
+    if(m.kind==="card") return;
+    if(m.kind==="tool"){ const [t,r]=m.text.split("|||"); lines.push("**\u2699 "+t+"**","",r,""); return; }
+    const who=m.role==="user"?"**You**":m.role==="sys"?"_system_":"**Muse**";
+    lines.push(who+"  \u00b7  "+fmtT(m.ts),"",m.text,"");
+  });
+  downloadText("open-muse-chat.md","text/markdown",lines.join("\n"));
+  await audit("chat","Exported conversation as Markdown"); toast("Conversation export downloaded.");
+};
 $("#exportcsv").onclick=async()=>{ downloadText("open-muse-goals.csv","text/csv",goalsCSV()); await audit("goal","Exported goals as CSV"); toast("CSV export downloaded."); };
 
 /* composer */
