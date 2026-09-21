@@ -39,7 +39,11 @@ with no region locks and no server holding your life.
 
 - It is BYO-key: chat runs on your own OpenRouter or Token Harbor key, stored in
   this browser only. Token Harbor's `:free` models never charge; one Universal Key
-  covers its whole catalog.
+  covers its whole catalog. NVIDIA NIM is supported as a self-hosted endpoint
+  (run a NIM container and point Open Muse at it): NVIDIA's hosted
+  integrate.api.nvidia.com only accepts browser calls from build.nvidia.com
+  itself, so a hosted nvapi- key cannot work from any web app - we checked and
+  say so in Settings instead of letting you find out the hard way.
 - On static hosting it cannot run after you close the tab; it picks up where it left
   off when you return and nudges you while it is open.
 - Connectors model the permission system locally. They gate planning and drafting;
