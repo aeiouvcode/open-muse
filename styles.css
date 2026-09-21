@@ -520,3 +520,28 @@ body.agent-busy #mstrip .ms-dot{background:var(--acc2);animation:st-pulse 1.5s v
 .mtid{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px}
 .mtms{color:var(--dim);font-size:11px;text-align:right;flex:none}
 .mtusebtn{padding:2px 10px!important;font-size:11px!important}
+
+/* shadcn-pattern chrome pass (native, no imports): visible keyboard focus,
+   44px touch targets on coarse pointers, toast slide-in, select anatomy */
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px;border-radius:6px}
+input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none;border-color:var(--acc);box-shadow:0 0 0 2px color-mix(in srgb,var(--acc) 35%,transparent)}
+.btn:focus-visible,.navbtn:focus-visible,.modebtn:focus-visible,.iconbtn:focus-visible,#sendbtn:focus-visible,#stopbtn:focus-visible,.wchip:focus-visible,.swatch:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+@media (pointer:coarse){
+  .btn{min-height:44px;padding:10px 15px}
+  .navbtn{min-height:44px;padding:12px 11px}
+  .iconbtn{min-width:44px;min-height:44px}
+  #sendbtn,#stopbtn{min-height:44px}
+  select,input[type="text"],input[type="password"]{min-height:44px}
+  .wchip{min-height:44px;display:inline-flex;align-items:center}
+  .swatch{min-width:44px;min-height:44px}
+}
+html[data-theme] select{padding-right:28px;background-image:linear-gradient(45deg,transparent 50%,var(--dim) 50%),linear-gradient(135deg,var(--dim) 50%,transparent 50%);background-position:calc(100% - 16px) 55%,calc(100% - 11px) 55%;background-size:5px 5px;background-repeat:no-repeat;-webkit-appearance:none;appearance:none}
+@keyframes toastin{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}
+.toast.on{animation:toastin .18s cubic-bezier(.16,1,.3,1)}
+@media (prefers-reduced-motion:reduce){
+  *,*:before,*:after{animation-duration:.01ms!important;transition-duration:.01ms!important}
+}
+@media (pointer:coarse){
+  #setmodel{min-width:0}
+  #modelfilter{width:88px!important}
+}
