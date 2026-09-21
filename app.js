@@ -108,8 +108,8 @@ const PROVIDERS = {
                  fallback:["openai/gpt-4o-mini","openai/gpt-4o","anthropic/claude-sonnet-4.5","google/gemini-2.5-flash","deepseek/deepseek-chat-v3-0324"] },
   tokenharbor: { name:"Token Harbor", url:"https://tokenharbor.ai/v1/chat/completions",    modelsUrl:"https://tokenharbor.ai/v1/models",    defModel:"deepseek-v4.1-flash:free", keyPh:"thk_live_...", hint:"Universal Key from the tokenharbor.ai dashboard - :free models never charge", authCatalog:true,
                  fallback:["deepseek-v4.1-flash:free","mimo-v2.5:free","muse-spark-3","kimi-k3","glm-5.3","gemini-3.8-flash"] },
-  nim:         { name:"NVIDIA NIM",   nim:true, defModel:"meta/llama-3.3-70b-instruct", keyPh:"nvapi-...", hint:"key from build.nvidia.com. Hosted calls go through NVIDIA's browser-friendly NVCF gateway - the integrate.api.nvidia.com host itself blocks browser calls (no CORS). Self-hosted NIM container? Point the endpoint at it (e.g. http://localhost:8000/v1).", authCatalog:true,
-                 fallback:["meta/llama-3.3-70b-instruct","meta/llama-3.1-8b-instruct","meta/llama-3.2-3b-instruct","microsoft/phi-4-mini-instruct","deepseek-ai/deepseek-v4-flash","minimaxai/minimax-m2.5"] },
+  nim:         { name:"NVIDIA NIM",   nim:true, defModel:"", keyPh:"nvapi-... (optional)", hint:"self-hosted NIM container (docker, port 8000) - no key needed locally. Verified constraint: NVIDIA's hosted integrate.api.nvidia.com only allows browser calls from build.nvidia.com itself, so a hosted nvapi- key cannot work from any web app - run NIM locally instead.",
+                 fallback:[] },
   local:       { name:"Local model",  local:true, defModel:"", keyPh:"no key needed", hint:"runs entirely on your machine - Ollama (ollama serve) or LM Studio's local server. No key, no cloud: prompts never leave this device.",
                  fallback:[] },
   edge:        { name:"On-device (EDGE//AI)", edge:true, defModel:"", keyPh:"no key needed", hint:"the EDGE//AI app runs the model in a hidden frame on this device - first use downloads model weights (Hugging Face), after that it works offline. No key, no cloud.",
@@ -125,7 +125,7 @@ function provEndpoints(){
     return { url: base + "/chat/completions", modelsUrl: base + "/models", base };
   }
   if(p.nim){
-    const base = String(S().settings.nimUrl || "https://api.nvcf.nvidia.com/v1").replace(/\/+$/,"");
+    const base = String(S().settings.nimUrl || "http://localhost:8000/v1").replace(/\/+$/,"");
     return { url: base + "/chat/completions", modelsUrl: base + "/models", base };
   }
   return { url: p.url, modelsUrl: p.modelsUrl, base: "" };
@@ -211,10 +211,11 @@ function renderStatus(){
   } else teamBox.hidden = true;
   $("#st-lastrow").hidden = !RT.last;
   $("#st-last").textContent = RT.last; $("#st-last").title = RT.last;
-  const keyless = !!provider().local || !!provider().edge;
+  const keyless = !!provider().local || !!provider().edge || !!provider().nim;
   // A key left in session storage from another engine is irrelevant to a
   // keyless provider - the rail reports what THIS engine needs and has.
-  const keyTxt = keyless ? null : (sessionStorage.getItem("openmuse.key") ? "set (session)" : (s.settings.keyStored ? "set (device)" : null));
+  const rawKey = sessionStorage.getItem("openmuse.key") ? "set (session)" : (s.settings.keyStored ? "set (device)" : null);
+  const keyTxt = keyless ? (provider().nim && rawKey ? rawKey : null) : rawKey;
   // Only name a provider/model once one is actually usable - a default label
   // with no key behind it is a claim the app can't back. Keyless providers
   // (local, EDGE//AI) are usable the moment they are selected.
@@ -223,7 +224,7 @@ function renderStatus(){
   $("#st-model").textContent = m || "none yet";
   $("#st-model").title = m || "";
   $("#st-model").classList.toggle("muted", !m);
-  $("#st-key").textContent = keyless ? "not needed" : (keyTxt || "none yet");
+  $("#st-key").textContent = keyless ? (keyTxt || (provider().nim ? "optional" : "not needed")) : (keyTxt || "none yet");
   const cl=$("#st-cloak"); if(cl){ cl.textContent = Cloak.on() ? `on \u00b7 ${Cloak.rules().length} rule${Cloak.rules().length===1?"":"s"}` : "off"; cl.classList.toggle("muted", !Cloak.on()); }
   $("#st-key").classList.toggle("muted", !keyTxt && !keyless);
   $("#st-actions").textContent = s.counters.actions;
@@ -675,8 +676,8 @@ function friendlyModelError(e){
 
 async function chatStream(messages, onTok, signal){
   const key=getKey(); const prov=provider(); const ep=provEndpoints();
-  if(!key && !prov.local && !prov.edge) throw new Error("no-key");
-  if(prov.local && !activeModel()) throw new Error("no-model");
+  if(!key && !prov.local && !prov.edge && !prov.nim) throw new Error("no-key");
+  if((prov.local || prov.nim) && !activeModel()) throw new Error("no-model");
   messages = Cloak.out(messages);
   if(prov.edge){
     const em = activeModel() || EdgeBridge.loadedModel || "";
@@ -714,8 +715,8 @@ async function chatStream(messages, onTok, signal){
 }
 async function chatOnce(messages, json, model){
   const key=getKey(); const prov=provider(); const ep=provEndpoints();
-  if(!key && !prov.local && !prov.edge) throw new Error("no-key");
-  if(prov.local && !(model || activeModel())) throw new Error("no-model");
+  if(!key && !prov.local && !prov.edge && !prov.nim) throw new Error("no-key");
+  if((prov.local || prov.nim) && !(model || activeModel())) throw new Error("no-model");
   messages = Cloak.out(messages);
   if(prov.edge){ const em = model || activeModel() || EdgeBridge.loadedModel || ""; if(!em) throw new Error("no-model"); return Cloak.back(await EdgeBridge.infer(messages, {model: em})); }
   const body={ model: model || activeModel(), messages, temperature:0.3 };
@@ -1411,7 +1412,8 @@ async function populateModelSelect(){
     if(ids===null){ ids = []; note = "EDGE//AI frame not up yet - the first run brings it up in a hidden frame; models load on the EDGE//AI side"; }
   } else if(prov.nim){
     $("#setmodelcustom").hidden = false;
-    if(!ids){ ids = prov.fallback.slice(); note = getKey() ? "catalog did not answer - showing common NIM models; type any id from build.nvidia.com below" : "enter your nvapi- key, save, then press \u21bb to load the catalog - showing common NIM models meanwhile"; }
+    if(!ids){ ids = []; note = "no NIM server answered at " + (S().settings.nimUrl||"http://localhost:8000/v1") + " - start your NIM container, press \u21bb, or type the model id below (build.nvidia.com lists them)"; }
+    else note = ids.length + " model" + (ids.length===1?"":"s") + " served by your NIM endpoint";
   } else if(prov.local){
     $("#setmodelcustom").hidden = false;
     if(!ids){ ids = []; note = "no local server found at " + (S().settings.localUrl||"http://localhost:11434/v1") + " - start Ollama or LM Studio, press \u21bb, or type the model id below"; }
@@ -1459,9 +1461,12 @@ function syncProviderUI(){
   $("#localurlwrap").hidden = !(isLocal || isNim);
   if(isNim){
     $("#localurlwrap label").textContent = "NIM endpoint base URL";
-    $("#setlocalurl").placeholder = "https://api.nvcf.nvidia.com/v1";
-    $("#localurlwrap .small").textContent = "Default is NVIDIA's NVCF gateway, which allows browser calls. Self-hosted NIM containers listen on 8000 by default.";
+    $("#setlocalurl").placeholder = "http://localhost:8000/v1";
+    $("#localurlwrap .small").textContent = "Self-hosted NIM containers listen on 8000 by default. Hosted integrate.api.nvidia.com is browser-locked to build.nvidia.com - a hosted key cannot work here.";
     $("#setlocalurl").value = S().settings.nimUrl || "";
+    $("#setkey").disabled = false;
+    $("#setsavekey").disabled = false;
+    $("#keylabel").textContent = "API key (optional - only if your NIM endpoint asks for one; a local container needs none)";
   } else if(isLocal){
     $("#localurlwrap label").textContent = "Local server base URL";
     $("#setlocalurl").placeholder = "http://localhost:11434/v1";
