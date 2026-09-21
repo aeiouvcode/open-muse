@@ -1474,7 +1474,7 @@ function syncProviderUI(){
   }
   $("#setkey").disabled = keyless;
   $("#setsavekey").disabled = keyless;
-  $("#keylabel").textContent = keyless
+  if(!isNim) $("#keylabel").textContent = keyless
     ? (prov.edge ? "No API key - EDGE//AI runs the model on this device" : "No API key - a local model runs on this machine and prompts never leave it")
     : "API key (stored in this browser only, sent only to your provider)";
   if(isLocal) $("#setlocalurl").value = S().settings.localUrl || "http://localhost:11434/v1";
