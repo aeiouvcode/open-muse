@@ -2669,7 +2669,7 @@ function runMiniApp(id){
     const f=document.createElement("iframe");
     f.className="studioframe"; f.setAttribute("sandbox","allow-scripts");
     f.src="studio-frame.html";
-    f.onload=()=>{ f.contentWindow.postMessage({openmuseApp:app.code}, "*"); };
+    f.onload=()=>{ f.contentWindow.postMessage({openmuseApp:app.code}, location.origin); };
     $("#framehost").appendChild(f);
   };
   mount();
