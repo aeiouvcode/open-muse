@@ -803,6 +803,7 @@ function friendlyModelError(e){
   if(m==="engine-runtime-missing") return "The built-in engine's runtime file is missing from this deployment - it should sit next to the app under vendor/. Redeploy or pick another provider meanwhile.";
   if(m==="engine-runtime-integrity") return "The built-in engine's runtime failed its integrity check, so I refused to run it. The deployed file does not match the pinned release - redeploy a clean copy.";
   if(provider().builtin && /out of memory|oom|allocation failed|insufficient memory/i.test(m)) return "That model did not fit in this device's memory. Pick the smallest one in Settings (Qwen3 0.6B) - it is made for phones.";
+  if(provider().builtin && /engine-model-list-4\d\d/.test(m)) return "That model repo was not found on Hugging Face - check the id (owner/repo) and try again.";
   if(provider().builtin && /failed to fetch|networkerror|load failed/i.test(m)) return "The model weights did not finish downloading - check the connection and tap Load again. Files that already finished are kept, so the retry picks up where it stopped.";
   if(S() && provider().builtin && !/^engine-/.test(m)) return "Built-in engine reported: "+m.slice(0,140);
   if(S() && provider().local && /failed to fetch|networkerror|load failed/i.test(m)) return "Could not reach the local model server at " + (S().settings.localUrl||"http://localhost:11434/v1") + ". Start Ollama (ollama serve) or LM Studio's server there, then try again. Nothing left this device.";
@@ -1767,8 +1768,9 @@ function renderEngine(){
   }
 }
 $("#engineload").addEventListener("click", async ()=>{
-  const model=(S().settings.model&&ENGINE_MODELS.some(m=>m.id===S().settings.model))?S().settings.model:ENGINE_MODELS[0].id;
-  S().settings.model=model; await Store.save();
+  const custom=(($("#enginecustom")||{}).value||"").trim();
+  const model= custom && /^[\w.-]+\/[\w.-]+$/.test(custom) ? custom : ((S().settings.model&&ENGINE_MODELS.some(m=>m.id===S().settings.model))?S().settings.model:ENGINE_MODELS[0].id);
+  if(!custom){ S().settings.model=model; await Store.save(); }
   const prog=$("#engineprog"), btn=$("#engineload");
   btn.disabled=true;
   LocalEngine.onProgress=(d)=>{

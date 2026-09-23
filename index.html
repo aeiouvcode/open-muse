@@ -247,7 +247,8 @@
             <button class="btn" id="engineunload" hidden>Unload</button>
           </div>
           <div id="engineprog" style="margin-top:8px"></div>
-          <div class="small" style="font-size:11.5px;color:var(--dim2);margin-top:6px">Runs fully on this device - WebGPU when available, plain WASM otherwise (slower, works everywhere). The first load downloads the weights once from Hugging Face; after that they come from this browser's cache and work offline. Nothing you type ever leaves this device on this engine.</div></div>
+          <input id="enginecustom" placeholder="or a custom Hugging Face repo - e.g. onnx-community/Qwen3-4B-Instruct-ONNX" autocomplete="off" spellcheck="false" style="margin-top:8px">
+          <div class="small" style="font-size:11.5px;color:var(--dim2);margin-top:6px">Runs fully on this device - WebGPU when available, plain WASM otherwise (slower, works everywhere). The first load downloads the weights once from Hugging Face; after that they come from this browser's cache and work offline. Custom repos need a q4 (WASM) or q4f16 (WebGPU) ONNX variant to load. Nothing you type ever leaves this device on this engine.</div></div>
         <div class="field"><label>Personal VM passphrase (optional - encrypts local storage with a key only you hold)</label>
           <input type="password" id="setpass" autocomplete="new-password" placeholder="leave blank to keep storage unencrypted"></div>
         <div class="field"><label style="display:flex;gap:9px;align-items:center;font-size:13px"><input type="checkbox" id="cloakon" style="width:auto"><span>Privacy cloak - swap private data for synthetic twins before anything leaves this browser</span></label>
@@ -311,7 +312,7 @@
 <!-- modal -->
 <div id="modalwrap"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
-<script src="app.js?v=202609231548"></script>
+<script src="app.js?v=202609231621"></script>
 </body>
 </html>
 
