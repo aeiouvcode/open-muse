@@ -1,4 +1,4 @@
-# CHECKPOINT — 2026-09-23 16:05 IST
+# CHECKPOINT — 2026-09-23 16:28 IST
 - Deployed main: 61dacfd. Engine load + streamed chat VERIFIED live (wasm/q4,
   SmolLM2-360M) at 390px. Screenshot: /downloads/cloud-browser-20260923-103354.png.
 - Deploy saga this cycle: worker-context downloads die >150-260MB in cloud browser
@@ -10,3 +10,8 @@
   (transformers-cache) - future QA loads are instant. CDP reconnects reset
   tab to about:blank once; re-navigate if so.
 - File gen 12 NOT started. Competitor critique NOT done. WebGPU untested.
+
+- 16:28: custom-repo field live (c43832b). File gen 12 published PRIVATE
+  (revision filerevision-01M36Y7GT9FQBTG0ZKN6WYA55D, generation 12), engine
+  excluded + hidden in File, verified via local-Chrome preview QA. Cycle report
+  + competitor critique sent to parent.

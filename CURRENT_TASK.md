@@ -1,4 +1,4 @@
-# CURRENT_TASK — Open Muse (updated 2026-09-23 16:05 IST)
+# CURRENT_TASK — Open Muse (updated 2026-09-23 16:28 IST)
 
 ## Status: built-in on-device engine WORKING on deployed build
 Proven live 2026-09-23 ~16:02 IST on the deployed site (cloud browser, 390px):
@@ -18,16 +18,23 @@ Screenshot: /downloads/cloud-browser-20260923-103354.png (task workspace).
   ort-wasm-simd-threaded.asyncify.{mjs,wasm}; without it load failed with
   "no available backend found". Hashes pinned in vendor/VERSIONS.md.
 
+## Done 16:28 IST
+- 8a7c200 custom HF repo field for the engine (any ONNX instruct repo with
+  q4/q4f16) + friendly not-found error. Deployed (c43832b).
+- Instinct File gen 12 PUBLISHED (PRIVATE): https://files.instinct.com/file-01M326APAT2KA6SM3C2HG5XAEB
+  Engine excluded from the File (70MB wasm + Cache API not shippable/guaranteed
+  in the File sandbox; external script/wasm origins blocked) - provider option
+  hidden via App.tsx patch. Verified in local Chrome: boots, providers correct,
+  honest no-key refusal, zero console errors. Cloud-browser viewer iframes fail
+  for ALL revisions (environment), bundle leases ~60s - QA previews locally.
+- Competitor critique sent to parent (Jan/LibreChat/Chatbox); top fix shipped =
+  the custom-repo field (model breadth); next top items below.
+
 ## Next actions (in order)
-1. Publish Instinct File gen 12 (file-01M326APAT2KA6SM3C2HG5XAEB, PRIVATE) from
-   repo: needs huggingface.co + *.cdn.hf.co origins in file.json + worker/vendor
-   bundling; assess single-file feasibility (worker + 40MB of wasm may not fit).
-2. Competitor-critique pass (standing directive): LibreChat / Jan / Chatbox-class
-   BYO-key clients + rival "Muse" paste. Name where we lose, fix top items.
-3. Full cycle report to parent with competitor critique.
-4. Nice-to-haves: default model instruction-following is weak (SmolLM2-360M
-   rambles) - consider prompting template or noting Qwen3-0.6B as the better
-   default; WebGPU path untested (QA browser has no adapter).
+1. Next improvement cycle from the critique: conversation search, then
+   branching (LibreChat/Jan gap), chat export polish.
+2. WebGPU verification on real GPU hardware (QA browser has no adapter).
+3. Default-model note: SmolLM2-360M rambles; consider Qwen3-0.6B as default.
 
 ## Standing rules
 No Instinct branding/wordplay user-visible; humanized errors only; no secrets in
