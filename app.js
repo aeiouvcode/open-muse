@@ -685,7 +685,7 @@ const LocalEngine = {
   worker:null, loadedModel:"", device:"", dtype:"", seq:Promise.resolve(), inflight:{}, onProgress:null, _load:null, _probe:null,
   ensure(){
     if(this.worker) return;
-    this.worker = new Worker("engine-worker.js?v=202609231443", { type:"module" });
+    this.worker = new Worker("engine-worker.js?v=202609231523", { type:"module" });
     this.worker.onmessage = (e)=> this.onmsg(e.data||{});
   },
   onmsg(d){

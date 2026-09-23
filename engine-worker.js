@@ -11,6 +11,57 @@ let stopper = null;
 
 const post = (o)=> self.postMessage(o);
 
+/* Resumable downloads. Long one-shot streams of a few hundred MB die on
+   flaky networks (and some proxies cap them), which used to kill a model
+   load with no way forward. Large Hugging Face files now download in
+   ranged chunks with retries and are handed to transformers.js as one
+   complete Response - it caches that response as usual, so after the first
+   load everything still runs fully offline. */
+const CHUNK = 24 * 1024 * 1024;
+const fileOf = (u)=>{ try{ return new URL(u).pathname.split("/").pop() || "file"; }catch(_){ return "file"; } };
+const chunkable = (u)=>{ try{ const h = new URL(u).hostname; return h==="huggingface.co" || h.endsWith(".huggingface.co"); }catch(_){ return false; } };
+const sleep = (ms)=> new Promise(r=>setTimeout(r, ms));
+async function getChunk(raw, url, start, end, tries){
+  let last = null;
+  for(let a=1; a<=tries; a++){
+    try{
+      const r = await raw(url, { headers:{ Range:"bytes="+start+"-"+end } });
+      if(r.status === 200) return { whole:true, response:r };
+      if(!r.ok && r.status!==206) throw new Error("http-"+r.status);
+      const cr = r.headers.get("content-range") || "";
+      const total = parseInt((cr.split("/")[1]||"0"), 10) || (end-start+1);
+      const buf = await r.arrayBuffer();
+      if(buf.byteLength === 0) throw new Error("empty-chunk");
+      return { whole:false, buf, total, type:r.headers.get("content-type")||"application/octet-stream" };
+    }catch(e){ last = e; await sleep(600*a); }
+  }
+  throw last || new Error("chunk-failed");
+}
+function patchFetch(){
+  if(self.__omFetch) return; self.__omFetch = true;
+  const raw = self.fetch.bind(self);
+  self.fetch = async (input, init)=>{
+    const url = typeof input==="string" ? input : (input && input.url) || "";
+    const method = (init && init.method) || (typeof input!=="string" && input && input.method) || "GET";
+    if(method!=="GET" || !chunkable(url) || (init && init.headers)) return raw(input, init);
+    const probe = await getChunk(raw, url, 0, CHUNK-1, 3);
+    if(probe.whole) return probe.response; // server ignored Range: plain stream, unchanged behavior
+    const total = probe.total;
+    const type = probe.type;
+    if(total <= CHUNK) return new Response(probe.buf, { status:200, headers:{ "Content-Type":type, "Content-Length":String(total) } });
+    const parts = [probe.buf];
+    let got = probe.buf.byteLength;
+    post({type:"progress", file:fileOf(url), progress:Math.round(got/total*100), loaded:got, total});
+    while(got < total){
+      const end = Math.min(got+CHUNK, total)-1;
+      const part = await getChunk(raw, url, got, end, 4);
+      parts.push(part.buf); got += part.buf.byteLength;
+      post({type:"progress", file:fileOf(url), progress:Math.round(got/total*100), loaded:got, total});
+    }
+    return new Response(new Blob(parts), { status:200, headers:{ "Content-Type":type, "Content-Length":String(total) } });
+  };
+}
+
 /* The runtime ships gzipped (vendor/transformers.min.js.gz): GitHub push
    protection false-positives on a 32-char class name ("Mistral3ForConditionalGeneration")
    in the raw bundle, so the pinned upstream bytes are stored compressed and
@@ -24,6 +75,7 @@ async function lib(){
   const hex = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", buf))).map(b=>b.toString(16).padStart(2,"0")).join("");
   if(hex !== TF_SHA256) throw new Error("engine-runtime-integrity");
   T = await import(URL.createObjectURL(new Blob([buf], {type:"text/javascript"})));
+  patchFetch();
   T.env.allowLocalModels = false;
   T.env.allowRemoteModels = true;
   T.env.useBrowserCache = true;
