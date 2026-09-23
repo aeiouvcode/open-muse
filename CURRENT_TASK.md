@@ -1,25 +1,38 @@
-# Current Task
+# CURRENT_TASK — Open Muse (updated 2026-09-23 15:30 IST)
 
-_Last updated: 2026-09-23 (IST)_
+## Active: built-in on-device engine (transformers.js) — hardening
+Engine shipped and deployed (main @ a4c08d7). Remaining: model load dies in the
+cloud QA browser partway through the ~370MB weight download ("Model call failed:
+network error"), even with 24MB ranged chunks + retries. Direct range probes from
+the same page succeed, so it is not CDN throttling. Discriminator test running:
+same chunked loop in page context (jsjob-1) vs worker context.
 
-## Active cycle
-**Built-in on-device engine (owner directive 2026-09-23: "use a respective engine or library for framework ... something that improves our project even more").** Replacing the hand-rolled on-device path with a real inference foundation: transformers.js 4.3.0 (vendored, pinned) on ONNX Runtime Web, WebGPU + WASM fallback, running in a module worker behind the existing provider interface. New provider "On-device (built-in)" with an engine panel in Settings (model catalog, download progress, load/unload), humanized engine errors, cloak bypassed on-device (nothing leaves), stop-button support, CSP tightened to an explicit connect-src allowlist (open network mode swaps wide). Local 390px QA in progress. Then: deploy (vendor binaries via in-page fetch->GitHub API), deployed-build QA, self-critique + security pass, report.
+## Next actions (in order)
+1. Read jsjob-1 result (page-side full 369MB chunked download, cloud browser tab 1).
+   - If page succeeds: failure is worker-context specific -> move weight download
+     to the main thread: prefetch model files into Cache API ("transformers-cache")
+     from app.js, then worker pipeline() reads cache (offline path unchanged).
+     File list via HF API: /api/models/{model}/tree/main?recursive=true
+     (config.json, generation_config.json, tokenizer.json, tokenizer_config.json,
+     onnx/model_q4.onnx or model_q4f16.onnx by device).
+   - If page also stalls: environment (Browserbase) cap on long downloads; test
+     resume-across-retries instead (keep completed chunks in IndexedDB, resume on
+     next Load click; currently every retry restarts the file).
+2. Strip QA instrumentation (RAWERR notice) once diagnosed -> commit 23fca62 is
+   LOCAL ONLY, never push as-is without stripping.
+3. Full happy-path QA: load SmolLM2-360M, chat "Reply with exactly: PONG",
+   verify streamed reply, screenshot 390px.
+4. Publish Instinct File gen 12 (file-01M326APAT2KA6SM3C2HG5XAEB, PRIVATE) from
+   repo: needs huggingface.co + *.cdn.hf.co origins in file.json + worker/vendor
+   bundling; assess feasibility (single-file constraint vs worker + wasm binaries).
+5. Competitor-critique pass (standing directive): rivals = LibreChat / Jan /
+   Chatbox-class BYO-key clients + rival "Muse" paste (grading files may be wiped;
+   observations DB has chat history). Name where we lose, fix top items.
+6. Full cycle report to parent: grade, frames, jsep landed + duplicate commit
+   note (d2d567d dup of 4d1e66e), race fix (fdc13b6), resumable downloads
+   (a4c08d7), competitor critique, state-file confirmation.
 
-## Last completed cycle
-**Rival model grading (2026-09-23).** Graded a rival model's "Muse" prompt output (delivered in 4 truncated WhatsApp batches) against this repo and the prompt's own spec. Verdict delivered: real strengths (net.js egress chokepoint + ledger + fetch freeze, post-wipe VERIFY report, cloak NER/twin pools, approval-gated memory, tree branching) and real bugs (boot-breaking truncated app.js + bad `$$$$` import, all sealed messages silently dropped on reload due to orphan key re-derivation, mock default provider with canned replies). Ranked steal list delivered.
-
-## Next actions (candidates, not started — need owner go-ahead)
-1. Implement ranked steal list, in order:
-   - net.js-style `guardedFetch` egress chokepoint: egress ledger, pre-flight PII abort, global fetch freeze option
-   - post-wipe VERIFY report on erase
-   - cloak NER cues + twin pools + tracking-param scrubber
-   - approval-gated memory writes
-   - conversation tree branching with regenerate
-   - `proveNoRawPII` outbound re-scan
-2. Grade the rival's `index.html` / `verify.mjs` / `SECURITY.md` if they ever arrive (offered; `verify.mjs` would be run, not just read).
-
-## Standing obligations every cycle
-- Rigorous self-critique before reporting (weakest point first; fix, then report residuals honestly).
-- Cybersecurity pass before reporting: no secrets in repo/history, no unexpected egress, no injection sinks (unsanitized innerHTML), nothing phoning home. Grade PASS/PARTIAL/FAIL.
-- 390px-phone-first design QA before shipping.
-- Keep CURRENT_TASK.md / CHECKPOINT.md / HANDOFF.md current each cycle.
+## Standing rules
+No Instinct branding/wordplay user-visible; humanized errors only; no secrets in
+repo; reimplement natively; 390px-first design QA; honest PASS/PARTIAL/FAIL;
+security pass every cycle; state files updated every cycle.
