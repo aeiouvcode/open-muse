@@ -685,7 +685,7 @@ const LocalEngine = {
   worker:null, loadedModel:"", device:"", dtype:"", seq:Promise.resolve(), inflight:{}, onProgress:null, _load:null, _probe:null,
   ensure(){
     if(this.worker) return;
-    this.worker = new Worker("engine-worker.js?v=202609231523", { type:"module" });
+    this.worker = new Worker("engine-worker.js?v=202609231548", { type:"module" });
     this.worker.onmessage = (e)=> this.onmsg(e.data||{});
   },
   onmsg(d){
@@ -701,10 +701,73 @@ const LocalEngine = {
     }
   },
   probe(){ this.ensure(); return new Promise(res=>{ this._probe=res; this.worker.postMessage({type:"probe"}); }); },
-  load(model, device){
+  async load(model, device){
     this.ensure();
     if(this._load) return Promise.reject(new Error("engine-busy"));
-    return new Promise((res,rej)=>{ this._load={res,rej}; this.worker.postMessage({type:"load", model, device:device||"auto"}); });
+    // Decide the device here on the main thread and prefetch the weights into
+    // the browser cache before the worker starts: long streams die in worker
+    // context on some networks, while the same chunked download completes on
+    // the main thread. The worker then reads everything from cache (offline
+    // after first load, same as before).
+    let dev = device && device!=="auto" ? device : "wasm";
+    if(!device || device==="auto"){
+      dev = "wasm";
+      try{ if(navigator.gpu && await navigator.gpu.requestAdapter()) dev = "webgpu"; }catch(_){}
+    }
+    const dtype = dev==="webgpu" ? "q4f16" : "q4";
+    await this.prefetch(model, dtype);
+    return new Promise((res,rej)=>{ this._load={res,rej}; this.worker.postMessage({type:"load", model, device:dev, dtype}); });
+  },
+  async prefetch(model, dtype){
+    if(!("caches" in self)) return; // no Cache API: worker downloads directly
+    const cache = await caches.open("transformers-cache");
+    const rt = await fetch("https://huggingface.co/api/models/"+model+"/tree/main?recursive=true");
+    if(!rt.ok) throw new Error("engine-model-list-"+rt.status);
+    const tree = await rt.json();
+    const paths = tree.filter(f=>f.type==="file").map(f=>f.path);
+    const wanted = [];
+    for(const p of ["config.json","generation_config.json","tokenizer.json","tokenizer_config.json","special_tokens_map.json"]) if(paths.includes(p)) wanted.push(p);
+    let weights = paths.filter(p=>p==="onnx/model_"+dtype+".onnx" || p==="onnx/model_"+dtype+".onnx_data");
+    if(!weights.length) weights = paths.filter(p=>p.startsWith("onnx/model_"+dtype) && p.endsWith(".onnx"));
+    if(!weights.length){ const q = paths.filter(p=>p.startsWith("onnx/") && p.endsWith(".onnx")); if(q.length===1) weights = q; }
+    wanted.push(...weights);
+    for(const p of wanted){
+      const url = "https://huggingface.co/"+model+"/resolve/main/"+p;
+      if(await cache.match(url)) continue;
+      await this.dlChunked(url, cache, p);
+    }
+  },
+  async dlChunked(url, cache, fname){
+    const CH = 24*1024*1024;
+    const prog = (loaded,total)=>{ if(this.onProgress) this.onProgress({type:"progress", file:fname, loaded, total, progress: total? Math.round(loaded/total*100) : 0}); };
+    const sleep = ms=>new Promise(r=>setTimeout(r,ms));
+    const get = async (start,end,tries)=>{
+      let last=null;
+      for(let a=1;a<=tries;a++){
+        try{
+          const r = await fetch(url,{headers:{Range:"bytes="+start+"-"+end}});
+          if(r.status===200) return {whole:true, response:r};
+          if(r.status!==206) throw new Error("http-"+r.status);
+          const cr=r.headers.get("content-range")||"";
+          const total=parseInt((cr.split("/")[1]||"0"),10)||(end-start+1);
+          const buf=await r.arrayBuffer();
+          if(!buf.byteLength) throw new Error("empty-chunk");
+          return {whole:false, buf, total, type:r.headers.get("content-type")||"application/octet-stream"};
+        }catch(e){ last=e; await sleep(600*a); }
+      }
+      throw last||new Error("chunk-failed");
+    };
+    const probe = await get(0, CH-1, 3);
+    if(probe.whole){ await cache.put(url, probe.response); return; }
+    const total = probe.total;
+    if(total<=CH){ await cache.put(url, new Response(probe.buf,{status:200,headers:{"Content-Type":probe.type,"Content-Length":String(total)}})); return; }
+    const parts=[probe.buf]; let got=probe.buf.byteLength;
+    prog(got,total);
+    while(got<total){
+      const part = await get(got, Math.min(got+CH,total)-1, 4);
+      parts.push(part.buf); got+=part.buf.byteLength; prog(got,total);
+    }
+    await cache.put(url, new Response(new Blob(parts), {status:200, headers:{"Content-Type":probe.type,"Content-Length":String(total)}}));
   },
   stop(){ if(this.worker) this.worker.postMessage({type:"stop"}); },
   infer(messages, opts){
@@ -740,7 +803,7 @@ function friendlyModelError(e){
   if(m==="engine-runtime-missing") return "The built-in engine's runtime file is missing from this deployment - it should sit next to the app under vendor/. Redeploy or pick another provider meanwhile.";
   if(m==="engine-runtime-integrity") return "The built-in engine's runtime failed its integrity check, so I refused to run it. The deployed file does not match the pinned release - redeploy a clean copy.";
   if(provider().builtin && /out of memory|oom|allocation failed|insufficient memory/i.test(m)) return "That model did not fit in this device's memory. Pick the smallest one in Settings (Qwen3 0.6B) - it is made for phones.";
-  if(provider().builtin && /failed to fetch|networkerror|load failed/i.test(m)) return "The model weights did not finish downloading - check the connection and tap Load again. Partial downloads are not kept.";
+  if(provider().builtin && /failed to fetch|networkerror|load failed/i.test(m)) return "The model weights did not finish downloading - check the connection and tap Load again. Files that already finished are kept, so the retry picks up where it stopped.";
   if(S() && provider().builtin && !/^engine-/.test(m)) return "Built-in engine reported: "+m.slice(0,140);
   if(S() && provider().local && /failed to fetch|networkerror|load failed/i.test(m)) return "Could not reach the local model server at " + (S().settings.localUrl||"http://localhost:11434/v1") + ". Start Ollama (ollama serve) or LM Studio's server there, then try again. Nothing left this device.";
   const st = m.match(/\bmodel (\d{3})\b/) || m.match(/\b(401|402|403|404|408|409|429|5\d\d)\b/);

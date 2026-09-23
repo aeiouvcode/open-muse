@@ -88,7 +88,7 @@ async function load(m){
   if(pipe && cur.model===m.model){ post({type:"ready", model:cur.model, device:cur.device, dtype:cur.dtype}); return; }
   if(pipe){ try{ await pipe.dispose(); }catch(_){} pipe = null; cur = { model:"", device:"", dtype:"" }; }
   const hasGpu = !!(self.navigator && navigator.gpu);
-  const device = m.device==="wasm" ? "wasm" : (hasGpu ? "webgpu" : "wasm");
+  const device = (m.device && m.device!=="auto") ? m.device : (hasGpu ? "webgpu" : "wasm");
   const dtype = m.dtype || (device==="webgpu" ? "q4f16" : "q4");
   const progress = (p)=>{
     if(!p) return;
