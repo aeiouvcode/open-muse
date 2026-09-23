@@ -442,8 +442,64 @@ function renderChat(){
   }));
   $$("#chatlog [data-approve]").forEach(b=>b.onclick=()=>decideStep(b.dataset.approve,true));
   $$("#chatlog [data-reject]").forEach(b=>b.onclick=()=>decideStep(b.dataset.reject,false));
-  log.scrollTop = log.scrollHeight;
+  const searching = !$("#chatsearchbar").hidden && ($("#chatsearch").value||"").trim();
+  if(searching) applyChatSearch(true); else log.scrollTop = log.scrollHeight;
 }
+
+/* ---------- conversation search ----------
+   Filter-jump over the current stream: matches get an outline, prev/next
+   cycles with the match scrolled into view. Search state lives only in the
+   DOM/inputs - nothing extra is stored. */
+let chatSearchCur = -1;
+function chatSearchHits(){
+  const q = ($("#chatsearch").value||"").trim().toLowerCase();
+  if(!q) return [];
+  return $$("#chatlog .msg").filter(el => el.textContent.toLowerCase().includes(q));
+}
+function applyChatSearch(keepCur){
+  const bar=$("#chatsearchbar"); if(!bar || bar.hidden) return;
+  const hits = chatSearchHits();
+  $$("#chatlog .msg.hit").forEach(el=>el.classList.remove("hit","cur"));
+  hits.forEach(el=>el.classList.add("hit"));
+  const q = ($("#chatsearch").value||"").trim();
+  $("#chatsearchcount").textContent = q ? (hits.length? String(hits.length) : "0") : "";
+  if(!hits.length){ chatSearchCur=-1; return; }
+  chatSearchCur = keepCur ? Math.min(Math.max(chatSearchCur,0), hits.length-1) : hits.length-1;
+  const cur = hits[chatSearchCur];
+  cur.classList.add("cur");
+  cur.scrollIntoView({block:"center", behavior:"smooth"});
+  $("#chatsearchcount").textContent = (chatSearchCur+1)+"/"+hits.length;
+}
+function chatSearchStep(d){
+  const hits = chatSearchHits(); if(!hits.length) return;
+  chatSearchCur = ((chatSearchCur + d) % hits.length + hits.length) % hits.length;
+  $$("#chatlog .msg.cur").forEach(el=>el.classList.remove("cur"));
+  const cur = hits[chatSearchCur];
+  cur.classList.add("cur");
+  cur.scrollIntoView({block:"center", behavior:"smooth"});
+  $("#chatsearchcount").textContent = (chatSearchCur+1)+"/"+hits.length;
+}
+function chatSearchClose(){
+  $("#chatsearchbar").hidden = true;
+  $("#chatsearch").value = "";
+  chatSearchCur = -1;
+  $$("#chatlog .msg.hit").forEach(el=>el.classList.remove("hit","cur"));
+  $("#chatlog").scrollTop = $("#chatlog").scrollHeight;
+}
+$("#chatsearchbtn").addEventListener("click", ()=>{
+  const bar=$("#chatsearchbar");
+  bar.hidden = !bar.hidden;
+  if(!bar.hidden){ $("#chatsearch").focus(); }
+  else chatSearchClose();
+});
+$("#chatsearch").addEventListener("input", ()=>applyChatSearch(false));
+$("#chatsearch").addEventListener("keydown", (e)=>{
+  if(e.key==="Enter"){ e.preventDefault(); chatSearchStep(e.shiftKey?-1:1); }
+  else if(e.key==="Escape"){ e.preventDefault(); chatSearchClose(); }
+});
+$("#chatsearchprev").addEventListener("click", ()=>chatSearchStep(-1));
+$("#chatsearchnext").addEventListener("click", ()=>chatSearchStep(1));
+$("#chatsearchclose").addEventListener("click", chatSearchClose);
 function inlineMd(t){
   return esc(t)
     .replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>")

@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Open Muse - a personal agent that belongs to you</title>
 <meta name="description" content="Open Muse is an open-source, local-first personal AI agent: goals to plans, approvals, memory, audit trail and a private local vault. Your machine, your rules.">
-<link rel="stylesheet" href="styles.css?v=202609231523">
+<link rel="stylesheet" href="styles.css?v=202609231742">
 </head>
 <body>
 <button id="menubtn" title="Menu">☰</button>
@@ -57,6 +57,7 @@
         </div>
         <span class="modenote" id="modenote">Personal agent</span>
         <span style="flex:1"></span>
+        <button class="btn iconbtn" id="chatsearchbtn" title="Search this conversation" aria-label="Search this conversation"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>
         <button class="btn" id="exportchatbtn" title="Download this conversation as a Markdown file">Export chat</button>
         <button class="btn coderonly" id="selftestsbtn">Self-tests</button>
         <button class="btn coderonly" id="diff2prop">Last diff &rarr; proposal</button>
@@ -70,6 +71,13 @@
         </div>
         <div class="cb-context"><span>Context</span><div class="cb-track"><i id="codercontextbar"></i></div><b id="codercontexttext">0%</b><span id="codercontextnote">fresh</span></div>
         <div class="cb-resume" id="coderresume">No checkpoint yet. Muse will preserve decisions, changed files and next steps locally.</div>
+      </div>
+      <div id="chatsearchbar" hidden>
+        <input id="chatsearch" placeholder="Search this conversation..." autocomplete="off" spellcheck="false">
+        <span id="chatsearchcount" class="small"></span>
+        <button class="btn iconbtn" id="chatsearchprev" title="Previous match" aria-label="Previous match"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M18 15l-6-6-6 6"/></svg></button>
+        <button class="btn iconbtn" id="chatsearchnext" title="Next match" aria-label="Next match"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M6 9l6 6 6-6"/></svg></button>
+        <button class="btn iconbtn" id="chatsearchclose" title="Close search" aria-label="Close search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
       </div>
       <div id="chatlog"></div>
       <div id="composer">
@@ -312,7 +320,7 @@
 <!-- modal -->
 <div id="modalwrap"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
-<script src="app.js?v=202609231621"></script>
+<script src="app.js?v=202609231742"></script>
 </body>
 </html>
 

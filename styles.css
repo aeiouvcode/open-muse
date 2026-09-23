@@ -549,3 +549,13 @@ html[data-theme] select{padding-right:28px;background-image:linear-gradient(45de
 /* built-in engine panel */
 .ebar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:4px}
 .ebar>div{height:100%;background:var(--acc);transition:width .3s var(--ease)}
+
+/* ---------- conversation search ---------- */
+#chatsearchbar{display:flex;gap:6px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel2)}
+#chatsearchbar[hidden]{display:none}
+#chatsearch{flex:1;min-width:0;padding:7px 10px;font-size:13px;border:1px solid var(--line);border-radius:var(--r);background:var(--panel);color:var(--ink)}
+#chatsearch:focus{outline:2px solid var(--acc);outline-offset:-1px}
+#chatsearchcount{color:var(--dim);font-size:11.5px;white-space:nowrap;min-width:34px;text-align:center}
+.iconbtn{padding:6px 7px;line-height:0}
+.msg.hit{outline:1.5px solid var(--acc);outline:1.5px solid color-mix(in srgb, var(--acc) 55%, transparent);outline-offset:-1.5px}
+.msg.hit.cur{outline:2.5px solid var(--acc);outline-offset:-2.5px;box-shadow:0 0 0 4px color-mix(in srgb, var(--acc) 18%, transparent)}

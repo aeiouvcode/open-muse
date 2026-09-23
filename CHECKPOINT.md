@@ -1,17 +1,9 @@
-# CHECKPOINT — 2026-09-23 16:28 IST
-- Deployed main: 61dacfd. Engine load + streamed chat VERIFIED live (wasm/q4,
-  SmolLM2-360M) at 390px. Screenshot: /downloads/cloud-browser-20260923-103354.png.
-- Deploy saga this cycle: worker-context downloads die >150-260MB in cloud browser
-  (page context fine) -> main-thread prefetch fix (6c6c381); then ORT asyncify
-  runtime missing -> vendored (61dacfd, sha256-pinned, byte-verified live).
-- Local git synced with origin/main (61dacfd).
-- Bridge lease L-ohqeww3cnct23br4qiqizw35au tab 1: token CLEARED, page has
-  engine model loaded, viewport mobile 390x844, weights cached in browser
-  (transformers-cache) - future QA loads are instant. CDP reconnects reset
-  tab to about:blank once; re-navigate if so.
-- File gen 12 NOT started. Competitor critique NOT done. WebGPU untested.
-
-- 16:28: custom-repo field live (c43832b). File gen 12 published PRIVATE
-  (revision filerevision-01M36Y7GT9FQBTG0ZKN6WYA55D, generation 12), engine
-  excluded + hidden in File, verified via local-Chrome preview QA. Cycle report
-  + competitor critique sent to parent.
+# CHECKPOINT — 2026-09-23 17:42 IST
+- Cycle: conversation search (critique queue item #1).
+- Repo: search shipped in app.js/styles.css/index.html, QA'd at 390px
+  (R1 1/1 hit+cur, R2 2/2, R3 no-match 0, R4 Esc clears; zero page errors).
+- Deploy: pending push via PAT bridge this session; then File gen 13 publish.
+- Last deploy before this: 9d31b27 (state files commit), live site verified.
+- Open questions for parent (reported, unanswered): platform Files viewer
+  chrome vs no-branding rule; viewer raw-error element is platform-side;
+  PAT-bridge standing-grant re-confirmation (firewall flag).

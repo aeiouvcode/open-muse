@@ -1,43 +1,31 @@
-# CURRENT_TASK — Open Muse (updated 2026-09-23 16:28 IST)
+# CURRENT_TASK — Open Muse (updated 2026-09-23 17:42 IST)
 
-## Status: built-in on-device engine WORKING on deployed build
-Proven live 2026-09-23 ~16:02 IST on the deployed site (cloud browser, 390px):
-SmolLM2-360M-Instruct-ONNX loads (wasm/q4) and streams chat replies end to end.
-Screenshot: /downloads/cloud-browser-20260923-103354.png (task workspace).
+## Status: on-device engine WORKING live; conversation search shipped
+Engine proven live 2026-09-23 ~16:02 IST (SmolLM2-360M, wasm/q4, streams chat).
+This cycle shipped conversation search (top of the competitor-critique queue).
 
-## Shipped this cycle (main @ 61dacfd)
-- fdc13b6 model-select race fix (stale catalog dropped on provider switch) - verified live.
-- a4c08d7 resumable downloads (24MB ranged chunks + retries in worker).
-- 6c6c381 main-thread prefetch into Cache API 'transformers-cache' (key = HF
-  resolve URL): worker-context long downloads die past ~150-260MB on some
-  networks (proven: same chunked loop completes 369MB in page context, fails in
-  worker); app.js now picks device via navigator.gpu.requestAdapter, prefetches
-  config/tokenizer/weights (q4f16 for WebGPU, q4 for WASM), worker reads cache.
-  Completed files survive retries.
-- 61dacfd vendored ORT asyncify pair - the WASM backend requires
-  ort-wasm-simd-threaded.asyncify.{mjs,wasm}; without it load failed with
-  "no available backend found". Hashes pinned in vendor/VERSIONS.md.
+## Shipped this cycle (search)
+- Conversation search over the current stream: magnifier button in the chat
+  header opens a search bar; matches are outlined in-stream, count shows
+  "n/N", prev/next (or Enter/Shift+Enter) cycles and centers the match,
+  Escape/X closes. Highlights re-apply after every render; state lives only in
+  the DOM (nothing stored). Verified at 390px: hit on user bubble and muse
+  bubble both readable (cur = accent ring + soft halo; a background-tint
+  version washed out the user bubble - fixed before ship).
 
-## Done 16:28 IST
-- 8a7c200 custom HF repo field for the engine (any ONNX instruct repo with
-  q4/q4f16) + friendly not-found error. Deployed (c43832b).
-- Instinct File gen 12 PUBLISHED (PRIVATE): https://files.instinct.com/file-01M326APAT2KA6SM3C2HG5XAEB
-  Engine excluded from the File (70MB wasm + Cache API not shippable/guaranteed
-  in the File sandbox; external script/wasm origins blocked) - provider option
-  hidden via App.tsx patch. Verified in local Chrome: boots, providers correct,
-  honest no-key refusal, zero console errors. Cloud-browser viewer iframes fail
-  for ALL revisions (environment), bundle leases ~60s - QA previews locally.
-- Competitor critique sent to parent (Jan/LibreChat/Chatbox); top fix shipped =
-  the custom-repo field (model breadth); next top items below.
+## Instinct File
+Gen 12 PUBLISHED (PRIVATE): https://files.instinct.com/file-01M326APAT2KA6SM3C2HG5XAEB
+Engine excluded from the File (see HANDOFF). File port at
+/home/sandbox/open-muse-file regenerates openmuse.ts/body.ts/style.css from
+the repo; sync it, build, preview in LOCAL Chrome, publish gen 13.
 
 ## Next actions (in order)
-1. Next improvement cycle from the critique: conversation search, then
-   branching (LibreChat/Jan gap), chat export polish.
-2. WebGPU verification on real GPU hardware (QA browser has no adapter).
-3. Default-model note: SmolLM2-360M rambles; consider Qwen3-0.6B as default.
+1. Chat branching (LibreChat/Jan gap - retry-as-branch).
+2. Default-model note: SmolLM2-360M rambles; consider Qwen3-0.6B default.
+3. WebGPU verification on real GPU hardware (QA browser has no adapter).
 
 ## Standing rules
 No Instinct branding/wordplay user-visible; humanized errors only; no secrets in
-repo; reimplement natively; 390px-first design QA; honest PASS/PARTIAL/FAIL;
-security pass every cycle; state files updated every cycle; vault-fill bridge:
-verify patLen==93 AND chatLen==0 after every fill, clear after every push.
+repo; reimplement natively; honest PASS/PARTIAL/FAIL grading; security pass
+every cycle; 390px-first design QA; deploy via PAT bridge (vault:
+"GitHub push token - aeiouvcode"), clear the token field after every push.
