@@ -4,6 +4,8 @@ An open-source, local-first personal AI agent, inspired by the idea of Meta's Mu
 (a personal agent that takes work off your plate) and rebuilt for everyone, everywhere,
 with no region locks and no server holding your life.
 
+![Open Muse agent workspace](docs/screenshot.jpg)
+
 **Live app:** https://aeiouvcode.github.io/open-muse/
 
 ## What it does
@@ -58,7 +60,6 @@ No build step, no dependencies, no backend.
 ## License
 
 MIT - see LICENSE. Built from scratch; no code from Meta or any existing project.
-
 
 ## Evolve (recursive self-improvement)
 
