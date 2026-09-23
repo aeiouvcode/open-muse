@@ -14,10 +14,10 @@ This cycle shipped conversation search (top of the competitor-critique queue).
   version washed out the user bubble - fixed before ship).
 
 ## Instinct File
-Gen 12 PUBLISHED (PRIVATE): https://files.instinct.com/file-01M326APAT2KA6SM3C2HG5XAEB
+Gen 13 PUBLISHED (PRIVATE): https://files.instinct.com/file-01M326APAT2KA6SM3C2HG5XAEB
 Engine excluded from the File (see HANDOFF). File port at
 /home/sandbox/open-muse-file regenerates openmuse.ts/body.ts/style.css from
-the repo; sync it, build, preview in LOCAL Chrome, publish gen 13.
+the repo; sync it, build, preview in LOCAL Chrome, gen 13 published (revision filerevision-01M3734HXS3CQ6EBTXAGHJM4QK).
 
 ## Next actions (in order)
 1. Chat branching (LibreChat/Jan gap - retry-as-branch).
