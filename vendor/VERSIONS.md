@@ -10,6 +10,8 @@ against these hashes before shipping; update this file with the new pin.
 | ort/ort-wasm-simd-threaded.wasm | onnxruntime-web@1.31.0-dev.20260914-8d85527a0 | 06ba057753da3847e4c24f02d91ab133455b0817c69a44993a9a53a2146df9e3 |
 | ort/ort-wasm-simd-threaded.jsep.mjs | onnxruntime-web@1.31.0-dev.20260914-8d85527a0 | c2f80e915e9df63289788a99d434d8c4e00e64e9c1f030f4b80b022458dd2c99 |
 | ort/ort-wasm-simd-threaded.jsep.wasm | onnxruntime-web@1.31.0-dev.20260914-8d85527a0 | 62ff86b2f2fa3a79eb87a7e4720e8ea9051942bf975f314181bf7dcef2feac06 |
+| ort/ort-wasm-simd-threaded.asyncify.mjs | onnxruntime-web@1.31.0-dev.20260914-8d85527a0 | 0966b6105cd936744498aa60df7a22cbd47af3374dbc64a9ab561c08a71e3611 |
+| ort/ort-wasm-simd-threaded.asyncify.wasm | onnxruntime-web@1.31.0-dev.20260914-8d85527a0 | 49871f5a4409519797e127440868a6d1923339d9185907f301a5b2a1d90af082 |
 
 Note: the smaller transformers.web.min.js externalizes onnxruntime-web (bare imports a browser cannot resolve without a bundler), so the self-contained transformers.min.js (ORT bundled, ESM exports) is vendored instead - stored gzipped, because GitHub push protection false-positives on the raw bytes (see below). engine-worker.js decompresses it at first use, verifies the sha256 above (of the RAW file) in JS, and refuses to run it on any mismatch.
 
