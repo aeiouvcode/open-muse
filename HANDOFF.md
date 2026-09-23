@@ -35,5 +35,11 @@ File `file-01M326APAT2KA6SM3C2HG5XAEB` (PRIVATE) is a separate port project (`/h
 ## QA method
 390px-phone-first. Playwright script (`playwright-core` + system chrome `--no-sandbox`) drives the cloud QA and screenshots; inspect actual pixels, never trust export success. Real-key verification happens in the cloud browser with the owner's key — tester passes on HTTP 200 + `choices`, not reply text.
 
+## Built-in engine (added 2026-09-23)
+- `engine-worker.js` - module worker running transformers.js; cache-bust its `?v=` in app.js (`LocalEngine.ensure`) whenever the worker changes.
+- `vendor/` - pinned inference runtime; hashes in `vendor/VERSIONS.md`. Never refresh without updating the pin file.
+- Model weights are NOT vendored; they download from Hugging Face at first use. CSP `connect-src` must keep huggingface.co + *.cdn.hf.co + *.xethub.hf.co.
+- Big vendor binaries do not fit the PAT bridge: push them via the in-page fetch->GitHub blobs/trees API job (background execute-js, the page downloads from jsDelivr and uploads to GitHub itself) or the logged-in GitHub web UI (25MB/file limit - the 28MB jsep wasm needs the API path).
+
 ## State files
 `CURRENT_TASK.md` (active cycle + next actions), `CHECKPOINT.md` (status, completed, failed approaches), `HANDOFF.md` (this file). Update all three every cycle — owner directive 2026-09-23.

@@ -56,7 +56,11 @@ A single-page web app where a personal agent:
 
 ## Architecture and stack
 
-- **Zero backend, zero build step, zero dependencies.** One static `index.html`
+- **Zero backend, zero build step, one vendored engine.** (Updated 2026-09-23 per
+  owner directive: the app now carries a real inference engine - transformers.js on
+  ONNX Runtime Web - vendored under vendor/ with pinned versions + sha256 in
+  vendor/VERSIONS.md, loaded from same origin. Still no build step, no runtime CDN,
+  no other dependencies.) One static `index.html`
   (plus README and MIT LICENSE) deployable to GitHub Pages or any static host.
 - **BYO model key.** The user pastes their own OpenRouter API key in Settings; it is
   kept in session/local storage in their browser and only ever sent to openrouter.ai.

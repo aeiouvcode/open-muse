@@ -13,6 +13,7 @@ _Last updated: 2026-09-23 (IST)_
 - Earlier: Eigent-style Workforce runs, Team/Swarm modes, Atelier redesign, Studio (user-built miniapps in sandboxed iframe).
 
 ## Failed approaches / traps (do not retry blindly)
+- **`@huggingface/transformers` `dist/transformers.web.min.js`**: externalizes `onnxruntime-web` + `onnxruntime-common` as bare imports - unresolvable in a browser without a bundler or import map (import maps do not apply inside workers). Use `dist/transformers.min.js` (self-contained ESM, ORT bundled).
 - **Model tester probing with `max_tokens: 1` + demanding reply text**: Gemini thinking models spend the whole 1-token budget on thought → 200 with empty content → tester reported every model broken. Probe now passes on HTTP 200 + a `choices` array, never on reply text.
 - **Hardcoded Gemini model id lists**: ids churn fast (`gemini-2.5-flash` 404'd live; 2.5 ids "no longer available to new users"). Always trust the live native catalog + tester over any id list.
 - **Chat without a stream watchdog**: provider 503s under load left streams sitting at zero bytes forever. Chat now has a 45s/90s stall watchdog.

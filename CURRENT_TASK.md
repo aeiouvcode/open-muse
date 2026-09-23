@@ -3,7 +3,7 @@
 _Last updated: 2026-09-23 (IST)_
 
 ## Active cycle
-None in flight. Awaiting direction.
+**Built-in on-device engine (owner directive 2026-09-23: "use a respective engine or library for framework ... something that improves our project even more").** Replacing the hand-rolled on-device path with a real inference foundation: transformers.js 4.3.0 (vendored, pinned) on ONNX Runtime Web, WebGPU + WASM fallback, running in a module worker behind the existing provider interface. New provider "On-device (built-in)" with an engine panel in Settings (model catalog, download progress, load/unload), humanized engine errors, cloak bypassed on-device (nothing leaves), stop-button support, CSP tightened to an explicit connect-src allowlist (open network mode swaps wide). Local 390px QA in progress. Then: deploy (vendor binaries via in-page fetch->GitHub API), deployed-build QA, self-critique + security pass, report.
 
 ## Last completed cycle
 **Rival model grading (2026-09-23).** Graded a rival model's "Muse" prompt output (delivered in 4 truncated WhatsApp batches) against this repo and the prompt's own spec. Verdict delivered: real strengths (net.js egress chokepoint + ledger + fetch freeze, post-wipe VERIFY report, cloak NER/twin pools, approval-gated memory, tree branching) and real bugs (boot-breaking truncated app.js + bad `$$$$` import, all sealed messages silently dropped on reload due to orphan key re-derivation, mock default provider with canned replies). Ranked steal list delivered.

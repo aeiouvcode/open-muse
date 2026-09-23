@@ -106,6 +106,8 @@ const S = () => Store.raw;
 const PROVIDERS = {
   gemini:      { name:"Gemini",       url:"https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", nativeCatalog:"https://generativelanguage.googleapis.com/v1beta/models?pageSize=100&key=", defModel:"gemini-3.8-flash", keyPh:"AIza...", hint:"free key from aistudio.google.com/apikey - the most reliable free tier, called straight from this browser", hintHtml:'free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> - the most reliable free tier, called straight from this browser', authCatalog:true,
                  fallback:["gemini-3.8-flash","gemini-3.7-flash","gemini-3.6-flash","gemini-3.5-flash","gemini-3.5-flash-lite","gemini-3-flash-preview","gemini-3.1-pro-preview","gemini-3-pro-preview","gemini-3.1-flash-lite","gemini-3.1-flash-lite-preview","gemini-2.5-pro","gemini-2.5-flash","gemini-2.5-flash-lite","gemini-2.5-flash-preview-09-2025","gemini-2.0-flash","gemini-2.0-flash-lite","gemini-flash-latest"] },
+  engine:      { name:"On-device (built-in)", builtin:true, defModel:"", keyPh:"no key needed", hint:"Muse's own engine runs the model right here in this app - WebGPU when your device has it, plain WASM otherwise. Weights download once from Hugging Face, then it works offline. Nothing you type ever leaves this device.",
+                 fallback:[] },
   openrouter:  { name:"OpenRouter",   url:"https://openrouter.ai/api/v1/chat/completions", modelsUrl:"https://openrouter.ai/api/v1/models", defModel:"openai/gpt-4o-mini",       keyPh:"sk-or-...",    hint:"key from openrouter.ai/keys",
                  fallback:["openai/gpt-4o-mini","openai/gpt-4o","anthropic/claude-sonnet-4.5","google/gemini-2.5-flash","deepseek/deepseek-chat-v3-0324"] },
   tokenharbor: { name:"Token Harbor", url:"https://tokenharbor.ai/v1/chat/completions",    modelsUrl:"https://tokenharbor.ai/v1/models",    defModel:"deepseek-v4.1-flash:free", keyPh:"thk_live_...", hint:"Universal Key from the tokenharbor.ai dashboard - :free models never charge", authCatalog:true,
@@ -213,7 +215,7 @@ function renderStatus(){
   } else teamBox.hidden = true;
   $("#st-lastrow").hidden = !RT.last;
   $("#st-last").textContent = RT.last; $("#st-last").title = RT.last;
-  const keyless = !!provider().local || !!provider().edge || !!provider().nim;
+  const keyless = !!provider().local || !!provider().edge || !!provider().nim || !!provider().builtin;
   // A key left in session storage from another engine is irrelevant to a
   // keyless provider - the rail reports what THIS engine needs and has.
   const rawKey = sessionStorage.getItem("openmuse.key") ? "set (session)" : (s.settings.keyStored ? "set (device)" : null);
@@ -221,7 +223,7 @@ function renderStatus(){
   // Only name a provider/model once one is actually usable - a default label
   // with no key behind it is a claim the app can't back. Keyless providers
   // (local, EDGE//AI) are usable the moment they are selected.
-  const em = (provider().edge ? (EdgeBridge.loadedModel || activeModel()) : activeModel()) || "";
+  const em = (provider().edge ? (EdgeBridge.loadedModel || activeModel()) : provider().builtin ? (LocalEngine.loadedModel || "") : activeModel()) || "";
   const m = keyless ? provider().name + (em ? " / " + em : "") : (keyTxt && em ? provider().name + " / " + em : null);
   $("#st-model").textContent = m || "none yet";
   $("#st-model").title = m || "";
@@ -397,7 +399,7 @@ function renderGoals(){
 function switchView(name){
   $$(".navbtn").forEach(x=>x.classList.toggle("on", x.dataset.view===name));
   $$(".view").forEach(v=>v.classList.toggle("on", v.id==="view-"+name));
-  if(name==="settings"){ $("#setprovider").value = S().settings.provider || "openrouter"; $("#setsavekey").checked = !!S().settings.keyStored; $("#setstrip").checked = S().settings.statusStrip !== false; syncProviderUI(); populateModelSelect(); renderCloak(); }
+  if(name==="settings"){ $("#setprovider").value = S().settings.provider || "openrouter"; $("#setsavekey").checked = !!S().settings.keyStored; $("#setstrip").checked = S().settings.statusStrip !== false; syncProviderUI(); populateModelSelect(); renderEngine(); renderCloak(); }
   if(name==="evolve") renderEvolutions();
 }
 function renderAll(){ renderGoals(); renderMemory(); renderConnectors(); renderAudit(); renderStatus(); renderChat(); renderCoderWorkbench(); renderEvolutions(); renderTasks(); renderRems(); renderTools(); renderSkills(); renderMcps(); renderStudio(); renderWorkforce(); renderHabits(); renderCloak(); }
@@ -668,6 +670,59 @@ const EdgeBridge = {
 
 /* ---------------- model ---------------- */
 function getKey(){ return sessionStorage.getItem("openmuse.key") || (S() && S().settings.keyStored) || ""; }
+/* ---------------- built-in on-device engine (transformers.js, vendored) ----------------
+   Models run in engine-worker.js on ONNX Runtime Web. Weights come from
+   Hugging Face once and then from the browser cache; prompts never leave
+   the device. ENGINE_MODELS is the curated catalog - sizes are the honest
+   q4/q4f16 download ranges from the model hubs. */
+const ENGINE_MODELS = [
+  { id:"onnx-community/SmolLM2-360M-Instruct-ONNX", label:"SmolLM2 360M - tiny, fits anywhere", size:"~0.26-0.37 GB" },
+  { id:"onnx-community/Qwen3-0.6B-Instruct-ONNX", label:"Qwen3 0.6B - fastest, made for phones", size:"~0.6-0.95 GB" },
+  { id:"onnx-community/Qwen2.5-1.5B-Instruct",    label:"Qwen2.5 1.5B - sharper, heavier",       size:"~1.2-1.7 GB" },
+  { id:"onnx-community/Llama-3.2-3B-Instruct-ONNX", label:"Llama 3.2 3B - desktop-class",        size:"~2 GB" },
+];
+const LocalEngine = {
+  worker:null, loadedModel:"", device:"", dtype:"", seq:Promise.resolve(), inflight:{}, onProgress:null, _load:null, _probe:null,
+  ensure(){
+    if(this.worker) return;
+    this.worker = new Worker("engine-worker.js?v=202609231443", { type:"module" });
+    this.worker.onmessage = (e)=> this.onmsg(e.data||{});
+  },
+  onmsg(d){
+    if(d.type==="progress"){ if(this.onProgress) this.onProgress(d); }
+    else if(d.type==="ready"){ this.loadedModel=d.model||""; this.device=d.device||""; this.dtype=d.dtype||""; if(this._load){ this._load.res(d); this._load=null; } }
+    else if(d.type==="unloaded"){ this.loadedModel=""; this.device=""; this.dtype=""; renderEngine(); renderStatus(); }
+    else if(d.type==="capabilities"){ if(this._probe){ this._probe(d); this._probe=null; } }
+    else if(d.type==="chunk"){ const p=this.inflight[d.id]; if(p && p.onTok) p.onTok(String(d.text||"")); }
+    else if(d.type==="done"){ const p=this.inflight[d.id]; delete this.inflight[d.id]; if(p) p.resolve(String(d.text||"")); }
+    else if(d.type==="error"){
+      if(d.for==="load" && this._load){ this._load.rej(new Error(d.message||"engine-error")); this._load=null; }
+      else { const p=this.inflight[d.id]; if(p){ delete this.inflight[d.id]; p.reject(new Error(d.message||"engine-error")); } }
+    }
+  },
+  probe(){ this.ensure(); return new Promise(res=>{ this._probe=res; this.worker.postMessage({type:"probe"}); }); },
+  load(model, device){
+    this.ensure();
+    if(this._load) return Promise.reject(new Error("engine-busy"));
+    return new Promise((res,rej)=>{ this._load={res,rej}; this.worker.postMessage({type:"load", model, device:device||"auto"}); });
+  },
+  stop(){ if(this.worker) this.worker.postMessage({type:"stop"}); },
+  infer(messages, opts){
+    opts = opts||{};
+    this.ensure();
+    if(!this.loadedModel) return Promise.reject(new Error("engine-not-loaded"));
+    const run = ()=> new Promise((resolve,reject)=>{
+      const id = uid("le");
+      this.inflight[id] = { resolve, reject, onTok: opts.onTok };
+      this.worker.postMessage({ type:"gen", id, messages, maxTokens: opts.maxTokens||640 });
+    });
+    // one model, one device: serialize generations so agent sub-calls never interleave
+    const out = this.seq.then(run, run);
+    this.seq = out.then(()=>{}, ()=>{});
+    return out;
+  }
+};
+
 /* human-readable model errors: never show raw provider JSON in chat */
 function friendlyModelError(e){
   const m = String(e && e.message || e);
@@ -680,6 +735,13 @@ function friendlyModelError(e){
   if(m==="edge-timeout") return "The EDGE//AI frame did not come up in 30s - edge-ai may be unreachable right now. Try again, or pick another engine in Settings.";
   if(m==="edge-infer-timeout") return "On-device inference timed out. A first run downloads model weights, which can take a while on slow connections - try again once the EDGE//AI app has the model cached.";
   if(S() && provider().edge && !/^edge-/.test(m)) return "EDGE//AI reported: "+m.slice(0,140);
+  if(m==="engine-not-loaded") return "No on-device model is loaded in the built-in engine yet. Open Settings - with On-device (built-in) picked, choose a model and tap Load. The first load downloads the weights once; after that they stay in this browser and work offline.";
+  if(m==="engine-busy") return "The built-in engine is already loading a model - give it a moment.";
+  if(m==="engine-runtime-missing") return "The built-in engine's runtime file is missing from this deployment - it should sit next to the app under vendor/. Redeploy or pick another provider meanwhile.";
+  if(m==="engine-runtime-integrity") return "The built-in engine's runtime failed its integrity check, so I refused to run it. The deployed file does not match the pinned release - redeploy a clean copy.";
+  if(provider().builtin && /out of memory|oom|allocation failed|insufficient memory/i.test(m)) return "That model did not fit in this device's memory. Pick the smallest one in Settings (Qwen3 0.6B) - it is made for phones.";
+  if(provider().builtin && /failed to fetch|networkerror|load failed/i.test(m)) return "The model weights did not finish downloading - check the connection and tap Load again. Partial downloads are not kept.";
+  if(S() && provider().builtin && !/^engine-/.test(m)) return "Built-in engine reported: "+m.slice(0,140);
   if(S() && provider().local && /failed to fetch|networkerror|load failed/i.test(m)) return "Could not reach the local model server at " + (S().settings.localUrl||"http://localhost:11434/v1") + ". Start Ollama (ollama serve) or LM Studio's server there, then try again. Nothing left this device.";
   const st = m.match(/\bmodel (\d{3})\b/) || m.match(/\b(401|402|403|404|408|409|429|5\d\d)\b/);
   const code = st ? st[1] : "";
@@ -698,8 +760,15 @@ function friendlyModelError(e){
 
 async function chatStream(messages, onTok, signal){
   const key=getKey(); const prov=provider(); const ep=provEndpoints();
-  if(!key && !prov.local && !prov.edge && !prov.nim) throw new Error("no-key");
+  if(!key && !prov.local && !prov.edge && !prov.nim && !prov.builtin) throw new Error("no-key");
   if((prov.local || prov.nim) && !activeModel()) throw new Error("no-model");
+  if(prov.builtin){
+    // on-device: nothing leaves the browser, so there is nothing to cloak
+    const em = activeModel() || LocalEngine.loadedModel || "";
+    if(!em) throw new Error("no-model");
+    if(!LocalEngine.loadedModel) throw new Error("engine-not-loaded");
+    return await LocalEngine.infer(messages, { stream:true, maxTokens:768, onTok: acc=>{ onTok && onTok(acc); } });
+  }
   messages = Cloak.out(messages);
   if(prov.edge){
     const em = activeModel() || EdgeBridge.loadedModel || "";
@@ -758,8 +827,14 @@ async function chatStream(messages, onTok, signal){
 }
 async function chatOnce(messages, json, model){
   const key=getKey(); const prov=provider(); const ep=provEndpoints();
-  if(!key && !prov.local && !prov.edge && !prov.nim) throw new Error("no-key");
+  if(!key && !prov.local && !prov.edge && !prov.nim && !prov.builtin) throw new Error("no-key");
   if((prov.local || prov.nim) && !(model || activeModel())) throw new Error("no-model");
+  if(prov.builtin){
+    const em = model || activeModel() || LocalEngine.loadedModel || "";
+    if(!em) throw new Error("no-model");
+    if(!LocalEngine.loadedModel) throw new Error("engine-not-loaded");
+    return await LocalEngine.infer(messages, { maxTokens:640 });
+  }
   messages = Cloak.out(messages);
   if(prov.edge){ const em = model || activeModel() || EdgeBridge.loadedModel || ""; if(!em) throw new Error("no-model"); return Cloak.back(await EdgeBridge.infer(messages, {model: em})); }
   const body={ model: model || activeModel(), messages, temperature:0.3 };
@@ -1190,7 +1265,7 @@ async function sendChat(auto){
 
   // honesty gate: without a model key nothing past here can work - say so
   // plainly and point at the fix instead of pretending to answer.
-  const keylessProv = !!provider().local || !!provider().edge || !!provider().nim;
+  const keylessProv = !!provider().local || !!provider().edge || !!provider().nim || !!provider().builtin;
   if(!getKey() && !keylessProv){
     await addMsg("muse", "I can't answer that yet - there is no model connected, so anything I said would be fake. Paste a **Gemini** key in Settings and everything starts working for real: chat, goals, plans, memory. The key is free and stays in this browser.");
     await addMsg("muse", `<div class="wactions"><button class="wchip" data-wa="settings">Set up a key</button><button class="wchip" data-wa="geminikey">Get a free Gemini key</button></div>`, "card");
@@ -1227,7 +1302,8 @@ async function sendChat(auto){
   const ctl=new AbortController();
   let lastPartial="";
   const stopBtn=$("#stopbtn");
-  if(!provider().edge){ stopBtn.hidden=false; stopBtn.onclick=()=>{ ctl.abort(); stopBtn.hidden=true; }; }
+  if(provider().builtin){ stopBtn.hidden=false; stopBtn.onclick=()=>{ LocalEngine.stop(); stopBtn.hidden=true; }; }
+  else if(!provider().edge){ stopBtn.hidden=false; stopBtn.onclick=()=>{ ctl.abort(); stopBtn.hidden=true; }; }
   const hist=S().chat.slice(-14).filter(m=>m.role!=="sys"&&!m.kind).map(m=>({role:m.role==="muse"?"assistant":m.role, content:m.text}));
   try{
     const m0 = mode();
@@ -1466,7 +1542,7 @@ async function populateModelSelect(){
   const sel = $("#setmodel");
   const current = S().settings.model || prov.defModel;
   sel.innerHTML = `<option value="">loading catalog...</option>`;
-  let ids = await fetchCatalog(pv);
+  let ids = prov.builtin ? null : await fetchCatalog(pv);
   let note = "";
   if(prov.edge){
     $("#setmodelcustom").hidden = false;
@@ -1478,6 +1554,10 @@ async function populateModelSelect(){
       else if(ids.length) note = ids.length + " on-device model" + (ids.length===1?"":"s") + " via EDGE//AI" + (EdgeBridge.loadedModel?` - loaded now: ${EdgeBridge.loadedModel}`:"");
     }catch(e){ ids = null; }
     if(ids===null){ ids = []; note = "EDGE//AI frame not up yet - the first run brings it up in a hidden frame; models load on the EDGE//AI side"; }
+  } else if(prov.builtin){
+    $("#setmodelcustom").hidden = true;
+    ids = ENGINE_MODELS.map(m=>m.id);
+    note = "built-in engine models - weights download once from Hugging Face, then run offline on this device. Load one in the panel below.";
   } else if(prov.nim){
     $("#setmodelcustom").hidden = false;
     if(!ids){ ids = []; note = "no NIM server answered at " + (S().settings.nimUrl||"http://localhost:8000/v1") + " - start your NIM container, press \u21bb, or type the model id below (build.nvidia.com lists them)"; }
@@ -1504,6 +1584,7 @@ async function populateModelSelect(){
 const MODEL_SELECT_CACHE = {ids:[], current:"", note:"", provName:""};
 function applyModelFilter(){
   const sel = $("#setmodel"); if(!sel) return;
+  const engMap = {}; ENGINE_MODELS.forEach(m=>{ engMap[m.id]=m.label+" ("+m.size+")"; });
   const q = ($("#modelfilter") ? $("#modelfilter").value : "").trim().toLowerCase();
   const {ids, current, note, provName} = MODEL_SELECT_CACHE;
   const shown = q ? ids.filter(id=>id.toLowerCase().includes(q)) : ids;
@@ -1511,7 +1592,7 @@ function applyModelFilter(){
   if(current && !list.includes(current)) list.unshift(current);
   const verMap=(S().settings.verified||{})[($("#setprovider")||{}).value]||{};
   sel.innerHTML = list.map(id=>{
-    const base = id.endsWith(":free") ? `FREE · ${id.replace(/:free$/,"")}` : id;
+    const base = engMap[id] || (id.endsWith(":free") ? `FREE · ${id.replace(/:free$/,"")}` : id);
     const label = verMap[id]!=null ? `\u2713 ${base} · answered in ${verMap[id]} ms` : base;
     return `<option value="${id}" ${id===current?"selected":""}>${label}</option>`;
   }).join("");
@@ -1526,6 +1607,7 @@ function mtReason(st){ return {400:"key or request rejected",401:"key rejected",
 $("#testmodels").addEventListener("click", async ()=>{
   const pv=$("#setprovider").value; const prov=PROVIDERS[pv]||PROVIDERS.openrouter;
   const box=$("#modeltest");
+  if(prov.builtin){ box.innerHTML=`<div class="small" style="color:var(--dim);margin-top:8px">The built-in engine's models verify themselves on load - pick one above and tap Load in the engine panel.</div>`; return; }
   if(prov.edge){ box.innerHTML=`<div class="small" style="color:var(--dim);margin-top:8px">On-device models load one at a time inside EDGE//AI - test them there instead.</div>`; return; }
   const keyless=!!prov.local||!!prov.nim;
   if(!getKey() && !keyless){ box.innerHTML=`<div class="small" style="color:var(--dim);margin-top:8px">Paste your key above and Save first - then the tester can show what it actually reaches.</div>`; return; }
@@ -1582,7 +1664,7 @@ function syncProviderUI(){
   $("#keyhint").innerHTML = prov.hintHtml ? prov.hintHtml : prov.edge
     ? 'the EDGE//AI app runs the model in a hidden frame on this device. <a href="https://aeiouvcode.github.io/edge-ai/" target="_blank" rel="noopener">Open EDGE//AI</a> to unlock it and load a chat model - Muse never downloads or switches models on its own.'
     : String(prov.hint||"").replace(/</g,"&lt;");
-  const isLocal = !!prov.local, isNim = !!prov.nim, keyless = (isLocal || !!prov.edge) && !isNim;
+  const isLocal = !!prov.local, isNim = !!prov.nim, keyless = (isLocal || !!prov.edge || !!prov.builtin) && !isNim;
   $("#localurlwrap").hidden = !(isLocal || isNim);
   if(isNim){
     $("#localurlwrap label").textContent = "NIM endpoint base URL";
@@ -1600,10 +1682,46 @@ function syncProviderUI(){
   $("#setkey").disabled = keyless;
   $("#setsavekey").disabled = keyless;
   if(!isNim) $("#keylabel").textContent = keyless
-    ? (prov.edge ? "No API key - EDGE//AI runs the model on this device" : "No API key - a local model runs on this machine and prompts never leave it")
+    ? (prov.edge ? "No API key - EDGE//AI runs the model on this device" : prov.builtin ? "No API key - the built-in engine runs the model on this device" : "No API key - a local model runs on this machine and prompts never leave it")
     : "API key (stored in this browser only, sent only to your provider)";
   if(isLocal) $("#setlocalurl").value = S().settings.localUrl || "http://localhost:11434/v1";
+  renderEngine();
 }
+function renderEngine(){
+  const wrap=$("#enginewrap"); if(!wrap) return;
+  const prov=PROVIDERS[($("#setprovider")||{}).value]||{};
+  wrap.hidden=!prov.builtin;
+  if(!prov.builtin) return;
+  const st=$("#enginestate"), model=(S()&&S().settings.model)||"";
+  if(LocalEngine.loadedModel){
+    st.innerHTML="Loaded: <b>"+esc(LocalEngine.loadedModel.split("/").pop())+"</b> on "+esc(LocalEngine.device||"this device")+(LocalEngine.dtype?" ("+esc(LocalEngine.dtype)+")":"");
+    $("#engineunload").hidden=false; $("#engineload").textContent="Reload";
+  } else {
+    st.textContent=model&&ENGINE_MODELS.some(m=>m.id===model)?("Picked: "+model.split("/").pop()+" - not loaded yet."):"Pick a model above, then load it here.";
+    $("#engineunload").hidden=true; $("#engineload").textContent="Load model";
+  }
+}
+$("#engineload").addEventListener("click", async ()=>{
+  const model=(S().settings.model&&ENGINE_MODELS.some(m=>m.id===S().settings.model))?S().settings.model:ENGINE_MODELS[0].id;
+  S().settings.model=model; await Store.save();
+  const prog=$("#engineprog"), btn=$("#engineload");
+  btn.disabled=true;
+  LocalEngine.onProgress=(d)=>{
+    const mb=d.total?(" - "+Math.round(d.loaded/1048576)+" of "+Math.round(d.total/1048576)+" MB"):"";
+    prog.innerHTML='<div class="small" style="font-size:12px;color:var(--dim)">'+esc(d.file?("Fetching "+d.file.split("/").pop()+mb):"Preparing...")+'</div><div class="ebar"><div style="width:'+(d.progress||0)+'%"></div></div>';
+  };
+  try{
+    const r=await LocalEngine.load(model,"auto");
+    prog.innerHTML='<div class="small" style="font-size:12px;color:var(--dim)">Ready on '+esc(r.device||"this device")+'.</div>';
+    toast("On-device model ready.");
+    await audit("engine","Loaded on-device model "+model+" on "+(r.device||"unknown"));
+  }catch(e){
+    prog.innerHTML='<div class="small" style="font-size:12px;color:#a33">'+esc(friendlyModelError(e))+'</div>';
+  }finally{
+    btn.disabled=false; LocalEngine.onProgress=null; renderEngine(); renderStatus();
+  }
+});
+$("#engineunload").addEventListener("click", ()=>{ if(LocalEngine.worker) LocalEngine.worker.postMessage({type:"unload"}); const prog=$("#engineprog"); if(prog) prog.innerHTML=""; });
 $("#setprovider").addEventListener("change", ()=>{ syncProviderUI(); populateModelSelect(); });
 $("#refreshmodels").addEventListener("click", populateModelSelect);
 $("#savesettings").addEventListener("click", async ()=>{
@@ -2528,11 +2646,18 @@ function renderSkills(){
 
 /* ---------------- open network + MCP ---------------- */
 const CSP_META = ()=> document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+/* Tight by default: the only origins this tab may connect to are the model
+   providers, the search providers, Hugging Face (built-in engine weights),
+   and local endpoints. Open network mode (MCP, fetch_page) is the documented
+   escape hatch and swaps in the wide policy until turned off. */
+const CSP_TIGHT = "default-src 'none'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https://generativelanguage.googleapis.com https://openrouter.ai https://tokenharbor.ai https://api.tavily.com https://api.search.brave.com https://api.monid.ai https://api.search.tinyfish.ai https://api.fetch.tinyfish.ai https://huggingface.co https://*.cdn.hf.co https://cdn-lfs.huggingface.co https://*.xethub.hf.co http://localhost:* http://127.0.0.1:*; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+const CSP_OPEN = CSP_TIGHT.replace(/connect-src [^;]+/, "connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:*");
 function applyNetPolicy(){
   // The shipped CSP already permits tool fetches (connect-src https:); keys are only ever
   // attached to the configured model provider by our own code, and sandboxed frames/workers
   // get connect-src 'none'. This toggle is the consent gate for MCP + arbitrary fetch_page.
   const on = !!(S() && S().settings.openNetwork);
+  const meta = CSP_META(); if(meta) meta.setAttribute("content", on ? CSP_OPEN : CSP_TIGHT);
   const st=$("#opennetstate"); if(st){ st.textContent = on?"ON - MCP and page fetch enabled":"off"; st.className = "pill "+(on?"warn":""); }
   const cb=$("#opennet"); if(cb) cb.checked = on;
 }

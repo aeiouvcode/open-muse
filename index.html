@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:*; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https://generativelanguage.googleapis.com https://openrouter.ai https://tokenharbor.ai https://api.tavily.com https://api.search.brave.com https://api.monid.ai https://api.search.tinyfish.ai https://api.fetch.tinyfish.ai https://huggingface.co https://*.cdn.hf.co https://cdn-lfs.huggingface.co https://*.xethub.hf.co http://localhost:* http://127.0.0.1:*; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Open Muse - a personal agent that belongs to you</title>
 <meta name="description" content="Open Muse is an open-source, local-first personal AI agent: goals to plans, approvals, memory, audit trail and a private local vault. Your machine, your rules.">
-<link rel="stylesheet" href="styles.css?v=202609221509">
+<link rel="stylesheet" href="styles.css?v=202609231443">
 </head>
 <body>
 <button id="menubtn" title="Menu">☰</button>
@@ -214,6 +214,7 @@
         <div class="field"><label>Model provider</label>
           <select id="setprovider">
             <option value="gemini">Gemini (recommended - free tier)</option>
+            <option value="engine">On-device (built-in) - private, no key, works offline</option>
             <option value="openrouter">OpenRouter</option>
             <option value="tokenharbor">Token Harbor</option>
             <option value="nim">NVIDIA NIM</option>
@@ -239,6 +240,14 @@
           <div class="small" id="modelhint" style="font-size:11.5px;color:var(--dim2);margin-top:4px"></div>
           <input id="setmodelcustom" placeholder="or type a model id - e.g. llama3.1:8b" autocomplete="off" spellcheck="false" style="margin-top:6px" hidden>
           <div id="modeltest"></div></div>
+        <div class="field" id="enginewrap" hidden><label>Built-in engine</label>
+          <div class="small" id="enginestate" style="font-size:12px;color:var(--dim)">No model loaded.</div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+            <button class="btn" id="engineload">Load model</button>
+            <button class="btn" id="engineunload" hidden>Unload</button>
+          </div>
+          <div id="engineprog" style="margin-top:8px"></div>
+          <div class="small" style="font-size:11.5px;color:var(--dim2);margin-top:6px">Runs fully on this device - WebGPU when available, plain WASM otherwise (slower, works everywhere). The first load downloads the weights once from Hugging Face; after that they come from this browser's cache and work offline. Nothing you type ever leaves this device on this engine.</div></div>
         <div class="field"><label>Personal VM passphrase (optional - encrypts local storage with a key only you hold)</label>
           <input type="password" id="setpass" autocomplete="new-password" placeholder="leave blank to keep storage unencrypted"></div>
         <div class="field"><label style="display:flex;gap:9px;align-items:center;font-size:13px"><input type="checkbox" id="cloakon" style="width:auto"><span>Privacy cloak - swap private data for synthetic twins before anything leaves this browser</span></label>
@@ -302,7 +311,7 @@
 <!-- modal -->
 <div id="modalwrap"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
-<script src="app.js?v=202609221509"></script>
+<script src="app.js?v=202609231443"></script>
 </body>
 </html>
 

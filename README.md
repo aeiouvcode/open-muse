@@ -23,12 +23,22 @@ with no region locks and no server holding your life.
 - **Audit trail.** Everything Muse has done and plans to do, recorded and inspectable.
 - **Personal VM.** All state lives in your browser. Set a passphrase and the store is
   encrypted with AES-GCM using a key derived from your passphrase - a key only you hold.
+- **A built-in on-device engine.** No key, no cloud: pick the On-device (built-in)
+  provider and Muse runs real chat models inside the app itself - transformers.js
+  (vendored and pinned, see vendor/VERSIONS.md) on ONNX Runtime Web, WebGPU when the
+  device has it, plain WASM otherwise. Weights download once from Hugging Face,
+  then run from the browser cache, offline. Nothing you type ever leaves the device
+  on this engine.
 
 ## Security
 
-- **Strict CSP:** `default-src 'none'` - the only network egress is the model call to
-  your chosen provider (openrouter.ai or tokenharbor.ai). No analytics, no CDN, no
-  third-party anything.
+- **Strict CSP:** `default-src 'none'`, and `connect-src` is an explicit allowlist:
+  your model provider, the search providers, Hugging Face (built-in engine weight
+  downloads - a download only; prompts are never sent there), and localhost
+  endpoints. No analytics, no CDN at runtime (the inference runtime is vendored
+  in-repo), no third-party anything else. Open network mode (for MCP servers and
+  page fetching) is the documented escape hatch and swaps in the wide policy only
+  while it is on.
 - **E2EE at rest and in export:** with a passphrase set, the local store is AES-GCM
   encrypted (PBKDF2, 210k iterations, key derived in-browser and never stored), and
   data exports come out as encrypted envelopes only your passphrase opens.
@@ -39,7 +49,9 @@ with no region locks and no server holding your life.
 
 ## What it is honest about
 
-- It is BYO-key: chat runs on your own OpenRouter or Token Harbor key, stored in
+- It works with no key at all: the built-in on-device engine runs models locally
+  (small models - expect helpful, not genius). BYO-key gets you the big clouds:
+  chat runs on your own Gemini, OpenRouter or Token Harbor key, stored in
   this browser only. Token Harbor's `:free` models never charge; one Universal Key
   covers its whole catalog. NVIDIA NIM is supported as a self-hosted endpoint
   (run a NIM container and point Open Muse at it): NVIDIA's hosted
