@@ -1,10 +1,12 @@
-# CHECKPOINT — 2026-09-23 15:30 IST
-- Deployed main: a4c08d7 (resumable downloads). Verified live: app.js?v=202609231523,
-  engine-worker.js?v=202609231523 served, chunk progress visible.
-- Race fix fdc13b6 verified live: engine models list stable after provider switch.
-- Engine load still FAILS past ~150-260MB in cloud browser (3 attempts: one-shot x2,
-  chunked x1). Range probes OK. Page-vs-worker discriminator running (jsjob-1).
-- Local git: a4c08d7 + unpushed 23fca62 (QA RAWERR instrumentation — strip before push).
-- Bridge: lease L-ohqeww3cnct23br4qiqizw35au tab 1; injected #pat input exists,
-  CLEARED of token; window.__files=null. Release lease + record browser_guidance at end.
-- File gen 12 NOT started. Competitor critique NOT done.
+# CHECKPOINT — 2026-09-23 16:05 IST
+- Deployed main: 61dacfd. Engine load + streamed chat VERIFIED live (wasm/q4,
+  SmolLM2-360M) at 390px. Screenshot: /downloads/cloud-browser-20260923-103354.png.
+- Deploy saga this cycle: worker-context downloads die >150-260MB in cloud browser
+  (page context fine) -> main-thread prefetch fix (6c6c381); then ORT asyncify
+  runtime missing -> vendored (61dacfd, sha256-pinned, byte-verified live).
+- Local git synced with origin/main (61dacfd).
+- Bridge lease L-ohqeww3cnct23br4qiqizw35au tab 1: token CLEARED, page has
+  engine model loaded, viewport mobile 390x844, weights cached in browser
+  (transformers-cache) - future QA loads are instant. CDP reconnects reset
+  tab to about:blank once; re-navigate if so.
+- File gen 12 NOT started. Competitor critique NOT done. WebGPU untested.
