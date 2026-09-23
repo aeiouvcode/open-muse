@@ -420,14 +420,33 @@ function renderChat(){
     if(m.kind==="tool"){ const [t,r]=m.text.split("|||"); return `<div class="toolcard"><b>⚙ ${esc(t)}</b><div class="res">${esc(r)}</div></div>`; }
     const cls = (m.role==="user" ? "user" : m.role==="sys" ? "sys" : "muse") + (m.kind==="checkpoint" ? " checkpoint" : "");
     const body = m.role==="muse" ? mdLite(m.text) : esc(m.text);
-    const retry = mi===lastUserMi ? ` <button class="msgretry" data-mi="${mi}" title="Send this again - drops everything after it">retry</button>` : "";
+    const br = (mi===lastUserMi && m.attempts && m.attempts.length>1) ? ` <button class="msgbranch" data-mi="${mi}" data-dir="-1" title="Previous reply variant">&lsaquo;</button><span class="branchno">${(m.attempt==null?m.attempts.length-1:m.attempt)+1}/${m.attempts.length}</span><button class="msgbranch" data-mi="${mi}" data-dir="1" title="Next reply variant">&rsaquo;</button>` : "";
+    const retry = mi===lastUserMi ? ` <button class="msgretry" data-mi="${mi}" title="Send this again - keeps this reply as a branch you can flip back to">retry</button>${br}` : "";
     return `<div class="msg ${cls}"><div class="body">${body}</div><div class="meta">${fmtT(m.ts)} <button class="msgcopy" data-mi="${mi}" title="Copy message">copy</button>${retry}</div></div>`;
   }).join("");
   $$("#chatlog .msgretry").forEach(b=>b.onclick=async()=>{
     const mi=+b.dataset.mi, m=S().chat[mi]; if(!m||m.role!=="user") return;
     const text=m.text;
+    const tail = S().chat.splice(mi+1);            // keep the old reply as a branch
+    if(tail.length){
+      m.attempts = m.attempts||[];
+      m.attempts[m.attempt==null? m.attempts.length : m.attempt] = tail;  // park the visible variant in its slot
+      m.attempts.push([]);                             // reserve a slot for the new reply
+      m.attempt = m.attempts.length - 1;
+      pendingBranch = {attempts:m.attempts, attempt:m.attempt};
+    }
     S().chat.splice(mi); await Store.save(); renderChat();
     sendChat({text, origin:"retry"});
+  });
+  $$("#chatlog .msgbranch").forEach(b=>b.onclick=async()=>{
+    const mi=+b.dataset.mi, dir=+b.dataset.dir, m=S().chat[mi]; if(!m||!m.attempts) return;
+    const n = m.attempts.length; if(n<2) return;
+    const cur = S().chat.splice(mi+1);             // park the visible attempt in its slot
+    const ai = m.attempt==null? n-1 : m.attempt;
+    m.attempts[ai] = cur;
+    m.attempt = (ai + dir + n) % n;
+    S().chat.push(...(m.attempts[m.attempt]||[]));
+    await Store.save(); renderChat();
   });
   $$("#chatlog .msgcopy").forEach(b=>b.onclick=async()=>{ const m=S().chat[+b.dataset.mi]; if(!m) return; try{ await navigator.clipboard.writeText(m.text); b.textContent="copied"; setTimeout(()=>b.textContent="copy",1200); }catch(e){ toast("Copy failed - select the text manually."); } });
   // live approval cards
@@ -451,6 +470,7 @@ function renderChat(){
    cycles with the match scrolled into view. Search state lives only in the
    DOM/inputs - nothing extra is stored. */
 let chatSearchCur = -1;
+let pendingBranch = null;   // retry carries the old user message's variants onto the new one
 function chatSearchHits(){
   const q = ($("#chatsearch").value||"").trim().toLowerCase();
   if(!q) return [];
@@ -1346,7 +1366,13 @@ async function sendChat(auto){
   const injected = auto && typeof auto.text==="string";
   const ta=$("#chatinput"); const text=(injected?auto.text:ta.value).trim().slice(0,4000); if(!text) return;
   if(!injected){ ta.value=""; ta.style.height="auto"; }
-  await addMsg("user", text); renderChat();
+  await addMsg("user", text);
+  if(pendingBranch){
+    const nm = S().chat[S().chat.length-1];
+    if(nm && nm.role==="user"){ nm.attempts = pendingBranch.attempts; nm.attempt = pendingBranch.attempt; await Store.save(); }
+    pendingBranch = null;
+  }
+  renderChat();
 
   // forget command handled locally, instantly
   const fm = text.match(/^forget (?:that |about )?(.+)/i);

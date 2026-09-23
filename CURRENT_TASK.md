@@ -19,10 +19,24 @@ Engine excluded from the File (see HANDOFF). File port at
 /home/sandbox/open-muse-file regenerates openmuse.ts/body.ts/style.css from
 the repo; sync it, build, preview in LOCAL Chrome, gen 13 published (revision filerevision-01M3734HXS3CQ6EBTXAGHJM4QK).
 
-## Next actions (in order)
-1. Chat branching (LibreChat/Jan gap - retry-as-branch).
-2. Default-model note: SmolLM2-360M rambles; consider Qwen3-0.6B default.
-3. WebGPU verification on real GPU hardware (QA browser has no adapter).
+## Competitive push (Naksh steering 2026-09-23 ~19:56 IST)
+"Make Open Muse substantially better - a competitive alternative." Benchmark:
+LibreChat (leading open ChatGPT-style app) + Jan (on-device reference). Plan
+reported to parent 20:18 IST. Roadmap, in order:
+1. Retry branches - IMPLEMENTED, local commit staged, deploy + gen 14 next.
+2. Multi-conversation sessions (sidebar list, new/rename/delete/switch) +
+   upgrade conversation search to cross-conversation. Biggest gap.
+3. Chat checkpoints + fork (borrows DigitalOcean Managed Agents fork/checkpoint).
+4. Shareable workforce templates as JSON export/import (borrows OpenMausBot
+   community team templates).
+5. Per-agent sandbox scopes for roster agents (borrows per-bot sandbox VM;
+   honestly labeled same-tab isolation).
+6. Credential broker formalization (single egress gate, per-scope key access,
+   key use in audit log).
+7. PWA manifest + install prompt (honest answer to native mobile).
+8. Default-model eval (SmolLM2-360M vs Qwen3-0.6B) + WebGPU on real GPU.
+Not chasing (impossible for a static page, would betray the pitch): real
+microVMs, server-side agents that run while closed, hosted sync.
 
 ## Standing rules
 No Instinct branding/wordplay user-visible; humanized errors only; no secrets in
