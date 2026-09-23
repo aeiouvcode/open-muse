@@ -1,6 +1,9 @@
 # CURRENT_TASK — Open Muse (updated 2026-09-23 17:42 IST)
 
-## Status: on-device engine WORKING live; conversation search shipped
+## Status: engine live; search + retry branches shipped and deployed
+Branches deployed as 0e7b349; File gen 14 PUBLISHED (PRIVATE, revision
+filerevision-01M37RHTVW751A8M1YMEE8C2CJ) after local-Chrome QA (branch 2/2
+flip, search coexistence, zero console errors).
 Engine proven live 2026-09-23 ~16:02 IST (SmolLM2-360M, wasm/q4, streams chat).
 This cycle shipped conversation search (top of the competitor-critique queue).
 
@@ -23,18 +26,17 @@ the repo; sync it, build, preview in LOCAL Chrome, gen 13 published (revision fi
 "Make Open Muse substantially better - a competitive alternative." Benchmark:
 LibreChat (leading open ChatGPT-style app) + Jan (on-device reference). Plan
 reported to parent 20:18 IST. Roadmap, in order:
-1. Retry branches - IMPLEMENTED, local commit staged, deploy + gen 14 next.
-2. Multi-conversation sessions (sidebar list, new/rename/delete/switch) +
+1. Multi-conversation sessions (sidebar list, new/rename/delete/switch) +
    upgrade conversation search to cross-conversation. Biggest gap.
-3. Chat checkpoints + fork (borrows DigitalOcean Managed Agents fork/checkpoint).
-4. Shareable workforce templates as JSON export/import (borrows OpenMausBot
+2. Chat checkpoints + fork (borrows DigitalOcean Managed Agents fork/checkpoint).
+3. Shareable workforce templates as JSON export/import (borrows OpenMausBot
    community team templates).
-5. Per-agent sandbox scopes for roster agents (borrows per-bot sandbox VM;
+4. Per-agent sandbox scopes for roster agents (borrows per-bot sandbox VM;
    honestly labeled same-tab isolation).
-6. Credential broker formalization (single egress gate, per-scope key access,
+5. Credential broker formalization (single egress gate, per-scope key access,
    key use in audit log).
-7. PWA manifest + install prompt (honest answer to native mobile).
-8. Default-model eval (SmolLM2-360M vs Qwen3-0.6B) + WebGPU on real GPU.
+6. PWA manifest + install prompt (honest answer to native mobile).
+7. Default-model eval (SmolLM2-360M vs Qwen3-0.6B) + WebGPU on real GPU.
 Not chasing (impossible for a static page, would betray the pitch): real
 microVMs, server-side agents that run while closed, hosted sync.
 
