@@ -1543,6 +1543,8 @@ async function populateModelSelect(){
   const current = S().settings.model || prov.defModel;
   sel.innerHTML = `<option value="">loading catalog...</option>`;
   let ids = prov.builtin ? null : await fetchCatalog(pv);
+  // the provider may have changed while the catalog was loading - drop stale results
+  if($("#setprovider").value !== pv) return;
   let note = "";
   if(prov.edge){
     $("#setmodelcustom").hidden = false;
