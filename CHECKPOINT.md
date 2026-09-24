@@ -1,7 +1,8 @@
-# CHECKPOINT - 2026-09-24 05:41 IST
-- Cycle: multi-conversation sessions shipped (60fc882, live bytes
-  sha256-verified) + File gen 15 PUBLISHED (PRIVATE) after local-Chrome QA
-  (migration, switch, cross-convo search chip, zero console errors).
-- Roadmap: next = chat checkpoints + fork (builds on the convo data model),
-  then shareable workforce templates.
+# CHECKPOINT - 2026-09-24 11:56 IST
+- Cycle: chat checkpoints + fork shipped (7e0d224, live bytes verified) +
+  File gen 16 PUBLISHED (PRIVATE) after local-Chrome QA (save/restore/
+  auto-save-on-restore/fork/delete/persist, zero console errors).
+- Workspace was rebuilt this run: re-cloned repo, reinstalled puppeteer-core,
+  File port restored via file checkout of the published revision.
+- Roadmap: next = shareable workforce templates (JSON export/import).
 - Local repo clean, synced to origin/main.
