@@ -1,11 +1,15 @@
-# CHECKPOINT - 2026-09-24 23:46 IST
-- Cycle COMPLETE: per-agent sandbox scopes shipped + deployed (origin/main
-  6962864, live bytes sha256-verified) + File gen 18 PUBLISHED (PRIVATE,
-  revision filerevision-01M3AA2BMG55Z8BXHMFRZ6WCD7). Per-agent tool toggles on
-  every roster row, enforced at tool-execution time (denials audited, agent
-  re-asked), scope overrides ride team template files, honest same-tab
-  isolation copy. QA: 14/14 local puppeteer checks + 7/7 File preview
-  checks PASS.
-- Roadmap: next = credential-broker formalization, then PWA manifest + install
-  prompt, then default-model eval (SmolLM2-360M vs Qwen3-0.6B) + WebGPU on real
-  hardware.
+# CHECKPOINT - 2026-09-25 00:45 IST
+- Cycle COMPLETE: PWA shipped + deployed + File gen 19 PUBLISHED (PRIVATE,
+  revision filerevision-01M3ADD6DFER8FWAY0847RJ6GF). Manifest + maskable
+  icons, versioned SW precache (offline boot, API traffic never cached),
+  consent-based update bar with old-cache purge + post-update toast,
+  install prompt (native / iOS instruction), "This app" settings row that
+  hides inside the hosted File. QA: 5/5 shell checks (manifest, SW
+  control, offline boot, settings row, install flow) + 4/4 update e2e
+  (bar, new cache, old purge, toast) + 6/6 File preview, zero real console
+  errors. Two real bugs found by QA and fixed: runtime CSP rewrite
+  stripping manifest-src, first-install spurious reload.
+- Deploy rule (new): sw.js VERSION must equal index.html ?v= - bump both
+  together every deploy (HANDOFF has the details).
+- Roadmap: credential-broker formalization, then default-model eval
+  (SmolLM2-360M vs Qwen3-0.6B) + WebGPU on real hardware.

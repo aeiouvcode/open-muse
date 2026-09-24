@@ -1,0 +1,16 @@
+{
+  "name": "Open Muse - a personal agent that belongs to you",
+  "short_name": "Open Muse",
+  "description": "An open-source, local-first personal AI agent: goals to plans, approvals, memory, audit trail and a private local vault. Your machine, your rules.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f2efe7",
+  "theme_color": "#bc4518",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

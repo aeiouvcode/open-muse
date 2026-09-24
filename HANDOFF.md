@@ -43,3 +43,17 @@ File `file-01M326APAT2KA6SM3C2HG5XAEB` (PRIVATE) is a separate port project (`/h
 
 ## State files
 `CURRENT_TASK.md` (active cycle + next actions), `CHECKPOINT.md` (status, completed, failed approaches), `HANDOFF.md` (this file). Update all three every cycle — owner directive 2026-09-23.
+
+## PWA deploy coupling (gen 19+)
+- sw.js `const VERSION` must equal the `?v=` cache-bust in index.html for
+  app.js/styles.css. The SW precaches `app.js?v=VERSION`; a mismatch means
+  the page's requests miss the precache and offline boot breaks silently.
+  Bump both in the same commit.
+- The SW never caches cross-origin traffic: provider calls, tool fetches
+  and engine weight downloads pass straight through. Do not add them.
+- applyNetPolicy rewrites the CSP meta at boot from CSP_TIGHT in app.js -
+  any CSP change must be made in BOTH index.html and CSP_TIGHT (this bit
+  us once: manifest-src was stripped at boot).
+- Update flow: new SW waits -> #updatebar -> Update posts SKIP_WAITING ->
+  controllerchange (only swaps after the first; first-install claim is
+  ignored) -> reload once -> toast via sessionStorage flag.

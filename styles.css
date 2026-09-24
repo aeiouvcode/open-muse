@@ -599,3 +599,9 @@ html[data-theme] select{padding-right:28px;background-image:linear-gradient(45de
 .cpacts .btn{font-size:11.5px;padding:4px 10px}
 #cpnewname{flex:1}
 @media (max-width:520px){.cprow{flex-direction:column;align-items:stretch;gap:7px}.cpacts{justify-content:flex-end}}
+
+/* update bar - calm, in-language, sits above the toast */
+#updatebar{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;z-index:90;display:flex;flex-wrap:wrap;gap:9px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;box-shadow:0 6px 24px rgba(33,28,19,.14);font-size:13px;color:var(--ink);max-width:min(92vw,420px)}
+#updatebar[hidden]{display:none}
+#updatebar span{flex:1 1 100%;margin-bottom:2px}
+#updatebar .btn{padding:6px 12px;flex:1}

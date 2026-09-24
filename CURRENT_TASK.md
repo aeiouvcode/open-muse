@@ -1,4 +1,24 @@
-# CURRENT_TASK — Open Muse (updated 2026-09-24 23:42 IST)
+# CURRENT_TASK — Open Muse (updated 2026-09-25 00:45 IST)
+
+## Status: engine live; app is now installable + offline-capable (gen 19)
+PWA shipped (this cycle, gen 19): Open Muse is a real installable app.
+manifest.webmanifest (standalone, theme #bc4518, 192/512/maskable icons
+rendered from the orb mark) + sw.js precaching the versioned app shell -
+the app boots with no network; model calls, tool fetches and engine
+downloads always go straight to the network and are never cached. Update
+flow: a new deploy surfaces as a calm bottom bar ("A new version of Open
+Muse is ready" - Update / Later); applying it swaps the worker, purges the
+old cache, reloads once and toasts "Updated to the latest version."
+Install: the browser's own prompt when offered, an honest Share > Add to
+Home Screen instruction on iOS, and a "This app" settings row that only
+appears where service workers actually run (hidden inside the hosted
+File). Found + fixed along the way: applyNetPolicy was rewriting the CSP
+meta at boot and stripping manifest-src (two sources of truth - both now
+carry it); first-install controllerchange caused a spurious reload (now
+only swaps after the first trigger a reload).
+Earlier: agent scopes 6962864 (gen 18), team templates af0993f (gen 17),
+checkpoints 7e0d224 (gen 16), sessions 60fc882 (gen 15), branches 0e7b349
+(gen 14), search (gen 13). Engine proven live 2026-09-23 ~16:02 IST.
 
 ## Status: engine live; search + branches + sessions + checkpoints + team templates + agent scopes shipped
 Agent scopes shipped (this cycle, gen 18): every workforce agent now runs with

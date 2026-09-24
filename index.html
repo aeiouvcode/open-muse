@@ -2,13 +2,20 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https://generativelanguage.googleapis.com https://openrouter.ai https://tokenharbor.ai https://api.tavily.com https://api.search.brave.com https://api.monid.ai https://api.search.tinyfish.ai https://api.fetch.tinyfish.ai https://huggingface.co https://*.cdn.hf.co https://cdn-lfs.huggingface.co https://*.xethub.hf.co http://localhost:* http://127.0.0.1:*; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https://generativelanguage.googleapis.com https://openrouter.ai https://tokenharbor.ai https://api.tavily.com https://api.search.brave.com https://api.monid.ai https://api.search.tinyfish.ai https://api.fetch.tinyfish.ai https://huggingface.co https://*.cdn.hf.co https://cdn-lfs.huggingface.co https://*.xethub.hf.co http://localhost:* http://127.0.0.1:*; img-src 'self' data:; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Open Muse - a personal agent that belongs to you</title>
 <link rel="icon" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="%23bc4518"/><circle cx="16" cy="16" r="5.5" fill="%23ffffff" opacity=".9"/></svg>'>
 <meta name="description" content="Open Muse is an open-source, local-first personal AI agent: goals to plans, approvals, memory, audit trail and a private local vault. Your machine, your rules.">
-<link rel="stylesheet" href="styles.css?v=202609242345">
+<meta name="theme-color" content="#bc4518">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Open Muse">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="styles.css?v=202609250100">
 </head>
 <body>
 <button id="menubtn" title="Menu">☰</button>
@@ -285,6 +292,13 @@
         <div class="field" style="display:flex;gap:9px;align-items:center">
           <input type="checkbox" id="setstrip" style="width:auto" checked>
           <label for="setstrip" style="margin:0;display:inline;font-size:13px">Status strip on small screens (one line up top showing what Muse is doing - hide it anytime with its &times;)</label></div>
+        <div class="field" id="appfield" hidden><label>This app</label>
+          <div class="small" id="appstatus" style="font-size:12px;color:var(--dim)"></div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:6px" id="appinstallrow" hidden>
+            <button class="btn" id="appinstallbtn">Install Open Muse</button>
+          </div>
+          <div class="small" id="appnote" style="font-size:11.5px;color:var(--dim2);margin-top:6px"></div>
+        </div>
         <div class="field"><label>Compatibility</label><div class="compat" id="compatlist"></div></div>
         <div class="row" style="display:flex;gap:9px">
           <button class="btn pri" id="savesettings">Save settings</button>
@@ -328,8 +342,13 @@
 
 <!-- modal -->
 <div id="modalwrap"><div class="modal" id="modal"></div></div>
+<div id="updatebar" hidden>
+  <span>A new version of Open Muse is ready.</span>
+  <button class="btn pri" id="updatebtn">Update</button>
+  <button class="btn" id="updatelater">Later</button>
+</div>
 <div class="toast" id="toast"></div>
-<script src="app.js?v=202609242345"></script>
+<script src="app.js?v=202609250100"></script>
 </body>
 </html>
 

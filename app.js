@@ -2960,7 +2960,7 @@ const CSP_META = ()=> document.querySelector('meta[http-equiv="Content-Security-
    providers, the search providers, Hugging Face (built-in engine weights),
    and local endpoints. Open network mode (MCP, fetch_page) is the documented
    escape hatch and swaps in the wide policy until turned off. */
-const CSP_TIGHT = "default-src 'none'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https://generativelanguage.googleapis.com https://openrouter.ai https://tokenharbor.ai https://api.tavily.com https://api.search.brave.com https://api.monid.ai https://api.search.tinyfish.ai https://api.fetch.tinyfish.ai https://huggingface.co https://*.cdn.hf.co https://cdn-lfs.huggingface.co https://*.xethub.hf.co http://localhost:* http://127.0.0.1:*; img-src 'self' data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+const CSP_TIGHT = "default-src 'none'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https://generativelanguage.googleapis.com https://openrouter.ai https://tokenharbor.ai https://api.tavily.com https://api.search.brave.com https://api.monid.ai https://api.search.tinyfish.ai https://api.fetch.tinyfish.ai https://huggingface.co https://*.cdn.hf.co https://cdn-lfs.huggingface.co https://*.xethub.hf.co http://localhost:* http://127.0.0.1:*; img-src 'self' data:; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const CSP_OPEN = CSP_TIGHT.replace(/connect-src [^;]+/, "connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:*");
 function applyNetPolicy(){
   // The shipped CSP already permits tool fetches (connect-src https:); keys are only ever
@@ -3607,6 +3607,112 @@ function doLock(reason){
 }
 ["pointerdown","keydown","touchstart"].forEach(ev=>addEventListener(ev, armIdleLock, {passive:true}));
 
+/* ---------------- PWA: offline shell, update flow, install prompt ----------------
+   The service worker precaches the app shell so Open Muse boots with no
+   network; model calls and tool fetches always go straight to the network.
+   A new deploy surfaces as a calm "Update" bar - never a surprise reload.
+   Install uses the browser's own prompt when it offers one; on iOS it is an
+   honest instruction instead. Everything here no-ops silently where service
+   workers or install prompts don't exist (including inside hosted embeds). */
+const PWA = { deferred:null, swReg:null };
+function pwaSupported(){ return "serviceWorker" in navigator && window.isSecureContext; }
+async function pwaSetup(){
+  if(!pwaSupported()) return;
+  try{
+    const reg = await navigator.serviceWorker.register("./sw.js", {updateViaCache:"none"});
+    PWA.swReg = reg;
+    if(sessionStorage.getItem("openmuse.updated")){
+      sessionStorage.removeItem("openmuse.updated");
+      toast("Updated to the latest version.");
+      audit("settings","App updated to the latest version");
+    }
+    if(reg.waiting && navigator.serviceWorker.controller) showUpdateBar(reg);
+    reg.addEventListener("updatefound", ()=>{
+      const w = reg.installing; if(!w) return;
+      w.addEventListener("statechange", ()=>{
+        if(w.state==="installed" && navigator.serviceWorker.controller) showUpdateBar(reg);
+      });
+    });
+    /* controllerchange also fires on first install (claim): the first swap we
+       see only means "became controlled". Every later swap is a version change. */
+    let sawController = !!navigator.serviceWorker.controller;
+    let reloaded=false;
+    navigator.serviceWorker.addEventListener("controllerchange", ()=>{
+      if(reloaded) return;
+      if(!sawController){ sawController=true; return; }
+      reloaded=true;
+      sessionStorage.setItem("openmuse.updated","1");
+      location.reload();
+    });
+  }catch(_){ /* no SW here (embed, file://) - the app works the same without it */ }
+
+  window.addEventListener("beforeinstallprompt", e=>{
+    e.preventDefault();
+    PWA.deferred = e;
+    renderAppField();
+  });
+  window.addEventListener("appinstalled", ()=>{
+    PWA.deferred = null;
+    toast("Installed - Open Muse is on your home screen now.");
+    audit("settings","App installed to home screen");
+    renderAppField();
+  });
+  renderAppField();
+}
+function pwaStandalone(){
+  return matchMedia("(display-mode: standalone)").matches || navigator.standalone===true;
+}
+function pwaIsIOS(){
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform==="MacIntel" && navigator.maxTouchPoints>1);
+}
+function showUpdateBar(reg){
+  const bar=$("#updatebar"); if(!bar) return;
+  bar.hidden=false;
+  $("#updatebtn").onclick=()=>{
+    bar.hidden=true;
+    if(reg.waiting) reg.waiting.postMessage("SKIP_WAITING");
+  };
+  $("#updatelater").onclick=()=>{ bar.hidden=true; };
+}
+function renderAppField(){
+  const f=$("#appfield"); if(!f) return;
+  const status=$("#appstatus"), row=$("#appinstallrow"), note=$("#appnote");
+  const offline = !!PWA.swReg;
+  if(pwaStandalone()){
+    f.hidden=false;
+    status.textContent="You're running the installed app.";
+    row.hidden=true;
+    note.textContent=offline?"It boots offline; model calls and tool fetches still need a connection.":"";
+    return;
+  }
+  if(PWA.deferred){
+    f.hidden=false;
+    status.textContent="Open Muse can live on your home screen, like any app.";
+    row.hidden=false;
+    $("#appinstallbtn").onclick=async()=>{
+      const d=PWA.deferred; PWA.deferred=null; if(!d) return;
+      d.prompt();
+      try{ await d.userChoice; }catch(_){}
+      renderAppField();
+    };
+    note.textContent=(offline?"Once installed it boots offline; model calls and tool fetches still need a connection.":"");
+    return;
+  }
+  if(pwaIsIOS() && offline){
+    f.hidden=false;
+    status.textContent="Open Muse can live on your home screen, like any app.";
+    row.hidden=true;
+    note.textContent="On this device: tap Share, then Add to Home Screen. Once installed it boots offline; model calls and tool fetches still need a connection.";
+    return;
+  }
+  f.hidden = !offline;
+  if(offline){
+    status.textContent="Open Muse works offline from this browser.";
+    row.hidden=true;
+    note.textContent="Model calls and tool fetches still need a connection.";
+  }
+}
+
 (async function boot(){
   await Store.load();
   if(Store.locked){ showLockScreen(); }
@@ -3634,6 +3740,7 @@ async function finishBoot(){
   applyNetPolicy();
   applyAppearance();
   Compat.render();
+  pwaSetup();
   if(S().settings.dockCollapsed){ document.body.classList.add("dock-collapsed"); $("#docktoggle").textContent = "\u2039"; }
   $("#docktoggle").addEventListener("click", async()=>{
     const c = document.body.classList.toggle("dock-collapsed");
