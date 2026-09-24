@@ -402,7 +402,7 @@ function switchView(name){
   if(name==="settings"){ $("#setprovider").value = S().settings.provider || "openrouter"; $("#setsavekey").checked = !!S().settings.keyStored; $("#setstrip").checked = S().settings.statusStrip !== false; syncProviderUI(); populateModelSelect(); renderEngine(); renderCloak(); }
   if(name==="evolve") renderEvolutions();
 }
-function renderAll(){ renderGoals(); renderMemory(); renderConnectors(); renderAudit(); renderStatus(); renderChat(); renderCoderWorkbench(); renderEvolutions(); renderTasks(); renderRems(); renderTools(); renderSkills(); renderMcps(); renderStudio(); renderWorkforce(); renderHabits(); renderCloak(); }
+function renderAll(){ renderConvos(); renderGoals(); renderMemory(); renderConnectors(); renderAudit(); renderStatus(); renderChat(); renderCoderWorkbench(); renderEvolutions(); renderTasks(); renderRems(); renderTools(); renderSkills(); renderMcps(); renderStudio(); renderWorkforce(); renderHabits(); renderCloak(); }
 
 /* ---------------- chat ---------------- */
 function addMsg(role, text, kind){
@@ -465,6 +465,91 @@ function renderChat(){
   if(searching) applyChatSearch(true); else log.scrollTop = log.scrollHeight;
 }
 
+/* ---------- conversations (multi-session chat) ----------
+   Invariant: the ACTIVE conversation's messages live in S().chat; every other
+   conversation keeps its messages in its convo entry's .chat. Switching parks
+   the active array into its entry and loads the target's. Same slot pattern
+   as retry branches. */
+function convoAutoName(chat){ const u=(chat||[]).find(m=>m.role==="user"); return u? u.text.replace(/\s+/g," ").slice(0,34) : ""; }
+function ensureConvos(){
+  const s=S(); if(!s) return;
+  if(!Array.isArray(s.convos)) s.convos=[];
+  if(!s.convos.length){
+    s.convos.push({id:"c"+Date.now().toString(36), name:convoAutoName(s.chat)||"First chat", _auto:true, created:new Date().toISOString(), updated:new Date().toISOString(), chat:[]});
+    s.activeConvo=s.convos[0].id;
+  }
+  if(!s.convos.find(c=>c.id===s.activeConvo)) s.activeConvo=s.convos[0].id;
+}
+function parkActiveConvo(){
+  ensureConvos();
+  const s=S(), c=s.convos.find(x=>x.id===s.activeConvo); if(!c) return;
+  c.chat=s.chat; c.updated=new Date().toISOString();
+  if(c._auto){ const n=convoAutoName(s.chat); if(n) c.name=n; }
+}
+async function switchConvo(id){
+  const s=S(); ensureConvos();
+  if(id===s.activeConvo) return;
+  parkActiveConvo();
+  const t=s.convos.find(c=>c.id===id); if(!t) return;
+  s.chat=t.chat||[]; t.chat=[]; s.activeConvo=id;
+  chatSearchCur=-1;
+  await Store.save(); renderChat(); renderConvos();
+}
+async function newConvo(){
+  const s=S(); ensureConvos(); parkActiveConvo();
+  const id="c"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);
+  s.convos.unshift({id, name:"New chat", _auto:true, created:new Date().toISOString(), updated:new Date().toISOString(), chat:[]});
+  s.chat=[]; s.activeConvo=id;
+  await addMsg("sys","New chat. Your other chats are kept in the list - nothing is lost.");
+  await Store.save(); renderChat(); renderConvos();
+  $("#chatinput").focus();
+}
+function renderConvos(){
+  const el=$("#chatlist"); if(!el || !S()) return;
+  ensureConvos();
+  const s=S();
+  el.innerHTML = s.convos.map(c=>{
+    const isA = c.id===s.activeConvo;
+    const chat = isA ? s.chat : (c.chat||[]);
+    const name = (c._auto ? (convoAutoName(chat)||c.name) : c.name) || "Chat";
+    const n = chat.filter(m=>m.role==="user").length;
+    return `<div class="convo${isA?" on":""}"><button class="convo-name" data-cid="${c.id}" title="${esc(name)}">${esc(name)}</button><span class="convo-n">${n||""}</span><button class="convo-rn" data-cid="${c.id}" title="Rename">&#9998;</button><button class="convo-x" data-cid="${c.id}" title="Delete chat">&times;</button></div>`;
+  }).join("");
+  $$("#chatlist .convo-name").forEach(b=>b.onclick=()=>switchConvo(b.dataset.cid));
+  $$("#chatlist .convo-x").forEach(b=>b.onclick=async()=>{
+    const s=S();
+    if(s.convos.length<=1){ toast("Keep at least one chat."); return; }
+    if(b.dataset.armed){ 
+      const id=b.dataset.cid;
+      s.convos = s.convos.filter(c=>c.id!==id);
+      if(s.activeConvo===id){ s.activeConvo=s.convos[0].id; s.chat=s.convos[0].chat||[]; s.convos[0].chat=[]; }
+      await Store.save(); renderChat(); renderConvos(); toast("Chat deleted.");
+    } else {
+      b.dataset.armed="1"; b.textContent="sure?"; b.classList.add("armed");
+      setTimeout(()=>{ if(b.isConnected){ delete b.dataset.armed; b.innerHTML="&times;"; b.classList.remove("armed"); } }, 2600);
+    }
+  });
+  $$("#chatlist .convo-rn").forEach(b=>b.onclick=()=>{
+    const c=S().convos.find(x=>x.id===b.dataset.cid); if(!c) return;
+    const row=b.closest(".convo"), nameBtn=row.querySelector(".convo-name");
+    const inp=document.createElement("input");
+    inp.className="convo-edit";
+    const shownChat = (c.id===S().activeConvo) ? S().chat : (c.chat||[]);
+    inp.value = c._auto ? (convoAutoName(shownChat)||c.name) : c.name;
+    inp.maxLength=48;
+    nameBtn.replaceWith(inp); inp.focus(); inp.select();
+    let done=false;
+    const finish=async(save)=>{
+      if(done) return; done=true;
+      if(save){ const v=inp.value.trim().slice(0,48); if(v){ c.name=v; c._auto=false; await Store.save(); } }
+      renderConvos();
+    };
+    inp.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); finish(true); } else if(e.key==="Escape"){ e.preventDefault(); finish(false); } });
+    inp.addEventListener("blur", ()=>finish(true));
+  });
+}
+$("#newconvobtn").addEventListener("click", newConvo);
+
 /* ---------- conversation search ----------
    Filter-jump over the current stream: matches get an outline, prev/next
    cycles with the match scrolled into view. Search state lives only in the
@@ -476,8 +561,24 @@ function chatSearchHits(){
   if(!q) return [];
   return $$("#chatlog .msg").filter(el => el.textContent.toLowerCase().includes(q));
 }
+function chatSearchOtherConvos(q){
+  const s=S(); if(!s || !Array.isArray(s.convos) || !q) return [];
+  const ql=q.toLowerCase();
+  return s.convos.filter(c=>c.id!==s.activeConvo).map(c=>{
+    const n=(c.chat||[]).filter(m=>(m.role==="user"||m.role==="muse") && (m.text||"").toLowerCase().includes(ql)).length;
+    return n? {id:c.id, name:c.name||"Chat", n} : null;
+  }).filter(Boolean);
+}
 function applyChatSearch(keepCur){
   const bar=$("#chatsearchbar"); if(!bar || bar.hidden) return;
+  const q0 = ($("#chatsearch").value||"").trim();
+  const other=$("#chatsearchother");
+  if(other){
+    const others = chatSearchOtherConvos(q0);
+    other.hidden = !others.length;
+    other.innerHTML = others.map(o=>`<button class="searchother" data-cid="${o.id}">${esc(o.name)} <b>${o.n}</b></button>`).join("");
+    $$("#chatsearchother .searchother").forEach(b=>b.onclick=async()=>{ await switchConvo(b.dataset.cid); });
+  }
   const hits = chatSearchHits();
   $$("#chatlog .msg.hit").forEach(el=>el.classList.remove("hit","cur"));
   hits.forEach(el=>el.classList.add("hit"));
@@ -3372,6 +3473,7 @@ async function finishBoot(){
       await Store.save();
     }
   }
+  ensureConvos();
   renderAll();
   applyModeUI();
   applyNetPolicy();

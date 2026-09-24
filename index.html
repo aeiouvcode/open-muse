@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Open Muse - a personal agent that belongs to you</title>
 <meta name="description" content="Open Muse is an open-source, local-first personal AI agent: goals to plans, approvals, memory, audit trail and a private local vault. Your machine, your rules.">
-<link rel="stylesheet" href="styles.css?v=202609231800">
+<link rel="stylesheet" href="styles.css?v=202609240535">
 </head>
 <body>
 <button id="menubtn" title="Menu">☰</button>
@@ -32,6 +32,10 @@
       
       <button class="navbtn" data-view="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.9 2.9l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.9-2.9l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.9-2.9l.1.1a1.7 1.7 0 0 0 1.9.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.5h0a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.9 2.9l-.1.1a1.7 1.7 0 0 0-.3 1.9v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
     </nav>
+    <div class="chatlistwrap">
+      <div class="chatlisthead"><span>Chats</span><button id="newconvobtn" title="Start a new chat">+ New</button></div>
+      <div id="chatlist"></div>
+    </div>
     <div class="spacer"></div>
     <div class="vmchip">
       <div class="t"><span>PERSONAL VM</span><span class="pill ok" id="vmstate"><span class="d"></span>local</span></div>
@@ -73,11 +77,12 @@
         <div class="cb-resume" id="coderresume">No checkpoint yet. Muse will preserve decisions, changed files and next steps locally.</div>
       </div>
       <div id="chatsearchbar" hidden>
-        <input id="chatsearch" placeholder="Search this conversation..." autocomplete="off" spellcheck="false">
+        <input id="chatsearch" placeholder="Search chats..." autocomplete="off" spellcheck="false">
         <span id="chatsearchcount" class="small"></span>
         <button class="btn iconbtn" id="chatsearchprev" title="Previous match" aria-label="Previous match"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M18 15l-6-6-6 6"/></svg></button>
         <button class="btn iconbtn" id="chatsearchnext" title="Next match" aria-label="Next match"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M6 9l6 6 6-6"/></svg></button>
         <button class="btn iconbtn" id="chatsearchclose" title="Close search" aria-label="Close search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+        <div id="chatsearchother" hidden></div>
       </div>
       <div id="chatlog"></div>
       <div id="composer">
@@ -320,7 +325,7 @@
 <!-- modal -->
 <div id="modalwrap"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
-<script src="app.js?v=202609231800"></script>
+<script src="app.js?v=202609240535"></script>
 </body>
 </html>
 
