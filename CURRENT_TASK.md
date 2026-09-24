@@ -1,4 +1,20 @@
-# CURRENT_TASK — Open Muse (updated 2026-09-23 17:42 IST)
+# CURRENT_TASK — Open Muse (updated 2026-09-24 23:42 IST)
+
+## Status: engine live; search + branches + sessions + checkpoints + team templates + agent scopes shipped
+Agent scopes shipped (this cycle, gen 18): every workforce agent now runs with
+an explicit, per-agent tool scope. Roster rows (built-in and custom) carry a
+one-tap tools toggle (web search, page fetch, calculator - researcher on by
+default, everything else off) and a plain-data-flow line: an agent sees only
+its subtask and its teammates' outputs, never chats, memory, or keys. Denied
+tool calls are blocked at execution time, logged to the audit trail
+(kind "scope"), and the agent is re-asked to answer from knowledge. Running
+agents show a gear marker in the status rail when tools are on. Team template
+files (gen 17 format, still v1) now carry scope overrides too, validated on
+import. Honest labeling throughout: same-tab isolation, not a separate machine.
+Also fixed: favicon 404 (inline SVG orb), truncated researcher description.
+Earlier: team templates af0993f (gen 17), checkpoints 7e0d224 (gen 16),
+sessions 60fc882 (gen 15), branches 0e7b349 (gen 14), search (gen 13).
+Engine proven live 2026-09-23 ~16:02 IST (SmolLM2-360M, wasm/q4, streams chat).
 
 ## Status: engine live; search + branches + sessions + checkpoints + team templates shipped
 Team templates deployed as af0993f; File gen 17 PUBLISHED (PRIVATE, revision

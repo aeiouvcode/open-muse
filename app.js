@@ -211,7 +211,7 @@ function renderStatus(){
   if(TEAM.active && TEAM.agents.length){
     teamBox.hidden = false;
     teamBox.innerHTML = TEAM.agents.map(ag=>
-      `<div class="teamrow"><span class="tic ${ag.status}">${ag.status==="done"?"\u2713":ag.status==="failed"?"\u2715":ag.status==="running"?'<i class="spin"></i>':ag.status==="waiting"?"\u25cc":"\u00b7"}</span><span class="trole">${esc(ag.role)}</span><span class="ttask">${esc(ag.task)}${ag.status==="waiting"&&ag.depends?" (after "+ag.depends.join("+")+")":""}</span></div>`).join("");
+      `<div class="teamrow"><span class="tic ${ag.status}">${ag.status==="done"?"\u2713":ag.status==="failed"?"\u2715":ag.status==="running"?'<i class="spin"></i>':ag.status==="waiting"?"\u25cc":"\u00b7"}</span><span class="trole">${esc(ag.role)}${roleToolsAllowed(ag.role)?' <span style="color:var(--dim2)" title="Tools on: web search, page fetch, calculator">⚙</span>':""}</span><span class="ttask">${esc(ag.task)}${ag.status==="waiting"&&ag.depends?" (after "+ag.depends.join("+")+")":""}</span></div>`).join("");
   } else teamBox.hidden = true;
   $("#st-lastrow").hidden = !RT.last;
   $("#st-last").textContent = RT.last; $("#st-last").title = RT.last;
@@ -3194,6 +3194,25 @@ function rolePrompt(role){
   if(custom) return "You are "+custom.name.toUpperCase()+" on a small agent workforce. "+custom.prompt+" Stay inside your specialty; output only the artifact.";
   return AgentRoles[role] || AgentRoles.researcher;
 }
+/* Per-agent scopes: what a workforce agent may touch. Every agent already runs
+   context-blind - it is handed only its subtask and its teammates' outputs,
+   never the chats, memory, or keys. The scope here is tool use (web search,
+   page fetch, calculator): researcher on by default, everyone else off, any
+   row flippable. Same-tab isolation - not a separate machine. */
+function roleToolsAllowed(role){
+  const s=S(); const key=String(role||"").toLowerCase();
+  const o=(s && s.roleTools) || {};
+  if(Object.prototype.hasOwnProperty.call(o, key)) return !!o[key];
+  return key==="researcher";
+}
+function resolveRole(role){
+  const r=String(role||"").slice(0,40);
+  const exact=Object.keys(AgentRoles).find(k=>k.toLowerCase()===r.toLowerCase());
+  if(exact) return exact;
+  const custom=(S() && S().agents || []).find(a=>a.name.toLowerCase()===r.toLowerCase());
+  if(custom) return custom.name;
+  return "researcher";
+}
 const TEAM = {active:false, mode:"", goal:"", agents:[]};
 async function runTeam(goalId, mode){
   if(mode==="workforce") return runWorkforce(goalId);
@@ -3283,8 +3302,9 @@ async function runWorkforce(goalId){
   TEAM.active=true; TEAM.mode="workforce"; TEAM.goal=g.title; TEAM.agents=[];
   setRT({state:"working", step:"Workforce: "+g.title, tool:""});
   try{
-    const rosterDesc=Object.keys(AgentRoles).map(r=>"- "+r).join("\n")
-      + (s.agents||[]).map(a=>"\n- "+a.name+": "+a.prompt).join("");
+    const rosterDesc=Object.keys(AgentRoles).map(r=>"- "+r)
+      .concat((s.agents||[]).slice(0,12).map(a=>"- "+a.name+": "+String(a.prompt).slice(0,120)))
+      .join("\n");
     let tasks;
     const decomp = await teamCall(()=>ai.generateText({messages:[
       {role:"system",content:"You are the coordinator of a small agent workforce. Decompose the goal into 3 to 6 subtasks as a dependency graph. Reply with strict JSON only: {\"tasks\":[{\"id\":\"t1\",\"role\":\"<roster role>\",\"task\":\"<one concrete self-contained subtask>\",\"depends\":[\"<id of an earlier task whose output this subtask needs>\"]}]}. Rules:\n- Assign roles only from this roster:\n"+rosterDesc+"\n- depends lists earlier task ids only (t1 may not depend on t3); a subtask with no dependencies gets [].\n- Independent subtasks must NOT depend on each other, so they run in parallel.\n- Make the final subtask synthesize the deliverable from whatever it needs."},
@@ -3295,7 +3315,7 @@ async function runWorkforce(goalId){
       if(tasks.length<2) throw 0;
       tasks.forEach((t,i)=>{
         t.id="t"+(i+1);
-        t.role=String(t.role||"researcher").slice(0,40);
+        t.role=resolveRole(t.role||"researcher");
         t.task=String(t.task||"").slice(0,300)||("Work on: "+g.title);
         t.depends=(Array.isArray(t.depends)?t.depends:[]).map(String).filter(d=>/^t\d+$/.test(d) && +d.slice(1)>=1 && +d.slice(1)<=i);
       });
@@ -3326,18 +3346,25 @@ async function runWorkforce(goalId){
         const depOut=t.depends.map(d=>byId(d)).filter(x=>x && x.status==="done")
           .map(x=>"["+x.role+" delivered]\n"+x.output.slice(0,2200)).join("\n\n");
         try{
+          const toolsOn=roleToolsAllowed(t.role);
           let out=await teamCall(()=>ai.generateText({messages:[
-            {role:"system",content:rolePrompt(t.role)},
+            {role:"system",content:rolePrompt(t.role)+(toolsOn && t.role!=="researcher"?" You may emit fenced ```tool blocks for web_search, fetch_page or calc.":"")},
             {role:"user",content:t.task+(g.note?"\nSteering: "+g.note:"")+(g.due?"\nDue: "+g.due:"")+(depOut?"\n\nWork handed to you by earlier agents:\n"+depOut:"")}
           ]}));
-          if(t.role==="researcher"){
-            const calls=parseToolCalls(out);
-            if(calls.length){
+          const calls=parseToolCalls(out);
+          if(calls.length){
+            if(toolsOn){
               const results=[];
               for(const c of calls.slice(0,3)){ results.push({tool:c.tool, result:await execTool(c.tool, c.args||{})}); }
               out=await teamCall(()=>ai.generateText({messages:[
                 {role:"system",content:rolePrompt(t.role)},
                 {role:"user",content:t.task+"\n\nTool results:\n"+results.map(r=>`[${r.tool}]\n${r.result}`).join("\n\n")+"\n\nWrite the final findings from this material."}
+              ]}));
+            }else{
+              await audit("scope",`Denied ${calls.length} tool call${calls.length===1?"":"s"} from "${t.role}" - tools are off for this agent`);
+              out=await teamCall(()=>ai.generateText({messages:[
+                {role:"system",content:rolePrompt(t.role)},
+                {role:"user",content:t.task+"\n\nTool use is switched off for your role, so no tools ran. Answer from what you know and flag anything you would have wanted to verify."}
               ]}));
             }
           }
@@ -3384,9 +3411,20 @@ function renderWorkforce(){
   const rl=$("#rosterlist");
   if(rl){
     rl.innerHTML=[
-      ...Object.entries(AgentRoles).map(([r,p])=>({name:r,desc:p.split(". ").slice(1).join(". ").slice(0,120),builtin:true})),
+      ...Object.entries(AgentRoles).map(([r,p])=>({name:r,desc:p.split(". ").slice(1).join(". "),builtin:true})),
       ...(s.agents||[]).map(a=>({id:a.id,name:a.name,desc:a.prompt,builtin:false}))
-    ].map(a=>`<div class="skill"><span class="txt"><b>${esc(a.name)}${a.builtin?" <span style='color:var(--dim2)'>(built-in)</span>":""}</b><span>${esc(a.desc)}</span></span>${a.builtin?"":`<button class="btn badb" data-agdel="${a.id}" style="padding:3px 9px">×</button>`}</div>`).join("");
+    ].map(a=>{
+      const tools=roleToolsAllowed(a.name);
+      return `<div class="skill"><span class="txt"><b>${esc(a.name)}${a.builtin?" <span style='color:var(--dim2)'>(built-in)</span>":""}</b><span>${esc(a.desc)}</span><span class="small" style="display:block;color:var(--dim2);font-size:11px;margin-top:2px">Sees only its subtask + teammates' outputs - never your chats, memory, or keys. Tools: ${tools?"on":"off"}.</span></span><button class="btn" data-agtools="${esc(a.name)}" title="Tool access for this agent: web search, page fetch, calculator" style="padding:3px 9px">${tools?"⚙ on":"⚙ off"}</button>${a.builtin?"":`<button class="btn badb" data-agdel="${a.id}" style="padding:3px 9px">×</button>`}</div>`;
+    }).join("");
+    $$("#rosterlist [data-agtools]").forEach(b=>b.onclick=async()=>{
+      const key=b.dataset.agtools.toLowerCase();
+      s.roleTools=s.roleTools||{};
+      const now=!roleToolsAllowed(key);
+      s.roleTools[key]=now;
+      await audit("scope",`Tools ${now?"enabled":"disabled"} for agent "${b.dataset.agtools}"`);
+      await Store.save(); renderWorkforce();
+    });
     $$("#rosterlist [data-agdel]").forEach(b=>b.onclick=async()=>{
       const i=s.agents.findIndex(x=>x.id===b.dataset.agdel);
       if(i>=0){ await audit("workforce",`Removed roster agent "${s.agents[i].name}"`); s.agents.splice(i,1); await Store.save(); renderWorkforce(); }
@@ -3447,7 +3485,7 @@ $("#exportteambtn").addEventListener("click", async()=>{
   const agents=(S().agents||[]).map(a=>({name:a.name, prompt:a.prompt}));
   const automations=(S().automations||[]).map(a=>({text:a.text, cadence:a.cadence}));
   if(!agents.length && !automations.length){ toast("Nothing to share yet - add a custom agent or an automation first."); return; }
-  const payload={format:"openmuse-team", v:1, exported:nowISO(), agents, automations};
+  const payload={format:"openmuse-team", v:1, exported:nowISO(), agents, automations, roleTools:S().roleTools||{}};
   downloadText("open-muse-team.json","application/json",JSON.stringify(payload,null,2));
   await audit("workforce",`Exported team template: ${agents.length} agents, ${automations.length} automations`);
   toast("Team file downloaded - share it anywhere.");
@@ -3482,6 +3520,14 @@ $("#importteamfile").addEventListener("change", async e=>{
     haveAuto.add(text.toLowerCase());
     S().automations.push({id:uid("au"), text, cadence, status:"active", runs:0, created:nowISO(), nextRun:new Date(Date.now()+CADENCE_MS[cadence]).toISOString(), lastRun:""});
     addedU++;
+  }
+  if(data.roleTools && typeof data.roleTools==="object" && !Array.isArray(data.roleTools)){
+    S().roleTools=S().roleTools||{};
+    const valid=new Set([...Object.keys(AgentRoles).map(r=>r.toLowerCase()), ...(S().agents||[]).map(a=>a.name.toLowerCase())]);
+    for(const [k,v] of Object.entries(data.roleTools)){
+      const key=String(k).toLowerCase().slice(0,40);
+      if(valid.has(key) && typeof v==="boolean") S().roleTools[key]=v;
+    }
   }
   await audit("workforce",`Imported team template: ${addedA} agents, ${addedU} automations (${skipped} skipped)`);
   await Store.save(); renderWorkforce();
