@@ -3439,6 +3439,55 @@ async function runAutomation(a, late){
 }
 
 /* workforce view form bindings */
+/* ---------- shareable team templates (OpenMausBot borrow) ----------
+   Export the custom roster + automations as one JSON file; import merges a
+   team file with fresh ids, name-dupe skips, and hard caps. */
+$("#exportteambtn").addEventListener("click", async()=>{
+  if(!S()) return;
+  const agents=(S().agents||[]).map(a=>({name:a.name, prompt:a.prompt}));
+  const automations=(S().automations||[]).map(a=>({text:a.text, cadence:a.cadence}));
+  if(!agents.length && !automations.length){ toast("Nothing to share yet - add a custom agent or an automation first."); return; }
+  const payload={format:"openmuse-team", v:1, exported:nowISO(), agents, automations};
+  downloadText("open-muse-team.json","application/json",JSON.stringify(payload,null,2));
+  await audit("workforce",`Exported team template: ${agents.length} agents, ${automations.length} automations`);
+  toast("Team file downloaded - share it anywhere.");
+});
+$("#importteambtn").addEventListener("click", ()=>$("#importteamfile").click());
+$("#importteamfile").addEventListener("change", async e=>{
+  const f=e.target.files[0]; e.target.value="";
+  if(!f) return;
+  if(f.size>512*1024){ toast("That file is too big to be a team template."); return; }
+  let data;
+  try{ data=JSON.parse(await f.text()); }
+  catch(_){ toast("That file is not readable JSON - pick an Open Muse team file."); return; }
+  if(!data || data.format!=="openmuse-team" || !Array.isArray(data.agents) || !Array.isArray(data.automations)){
+    toast("That file is not an Open Muse team template."); return;
+  }
+  if(!S()) return;
+  let addedA=0, addedU=0, skipped=0;
+  const names=new Set([...Object.keys(AgentRoles).map(r=>r.toLowerCase()), ...(S().agents||[]).map(a=>a.name.toLowerCase())]);
+  for(const a of data.agents.slice(0,50)){
+    const name=String(a.name||"").trim().slice(0,40), prompt=String(a.prompt||"").trim().slice(0,280);
+    if(!name || !prompt){ skipped++; continue; }
+    if(names.has(name.toLowerCase())){ skipped++; continue; }
+    names.add(name.toLowerCase());
+    S().agents.push({id:uid("ag"), name, prompt, created:nowISO()});
+    addedA++;
+  }
+  const haveAuto=new Set((S().automations||[]).map(a=>a.text.toLowerCase()));
+  for(const a of data.automations.slice(0,50)){
+    const text=String(a.text||"").trim().slice(0,280), cadence=["hourly","daily","weekly"].includes(a.cadence)?a.cadence:"daily";
+    if(!text){ skipped++; continue; }
+    if(haveAuto.has(text.toLowerCase())){ skipped++; continue; }
+    haveAuto.add(text.toLowerCase());
+    S().automations.push({id:uid("au"), text, cadence, status:"active", runs:0, created:nowISO(), nextRun:new Date(Date.now()+CADENCE_MS[cadence]).toISOString(), lastRun:""});
+    addedU++;
+  }
+  await audit("workforce",`Imported team template: ${addedA} agents, ${addedU} automations (${skipped} skipped)`);
+  await Store.save(); renderWorkforce();
+  toast(`Team imported: ${addedA} agent${addedA===1?"":"s"}, ${addedU} automation${addedU===1?"":"s"}${skipped?` (${skipped} skipped as duplicates or invalid)`:""}.`);
+});
+
 $("#addagentbtn").addEventListener("click", async()=>{
   if(!S()) return;
   const name=$("#newagentname").value.trim().slice(0,40), prompt=$("#newagentprompt").value.trim().slice(0,280);

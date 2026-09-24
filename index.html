@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Open Muse - a personal agent that belongs to you</title>
 <meta name="description" content="Open Muse is an open-source, local-first personal AI agent: goals to plans, approvals, memory, audit trail and a private local vault. Your machine, your rules.">
-<link rel="stylesheet" href="styles.css?v=202609241142">
+<link rel="stylesheet" href="styles.css?v=202609241736">
 </head>
 <body>
 <button id="menubtn" title="Menu">☰</button>
@@ -128,6 +128,8 @@
           <div class="sub" style="font-size:12px;color:var(--dim)">Four built-in specialists ship with Muse. Add your own - a Workforce run's coordinator assigns subtasks across the whole roster.</div>
           <div id="rosterlist"></div>
           <div class="trow"><input id="newagentname" placeholder="Agent name - e.g. Data analyst" maxlength="40"><input id="newagentprompt" placeholder="Specialty - how this agent thinks and what it outputs" maxlength="280"><button class="btn" id="addagentbtn">Add agent</button></div>
+          <div class="trow" style="margin-top:6px"><button class="btn" id="exportteambtn">Share team</button><button class="btn" id="importteambtn">Import team</button><input type="file" id="importteamfile" accept="application/json,.json" hidden>
+            <span class="small" style="color:var(--dim2);font-size:11.5px">A team file carries your custom agents and automations as JSON - share it and someone else's Muse can adopt the same crew.</span></div>
         </div>
         <div class="taskbox">
           <h3 style="margin:0">Automations</h3>
@@ -326,7 +328,7 @@
 <!-- modal -->
 <div id="modalwrap"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
-<script src="app.js?v=202609241142"></script>
+<script src="app.js?v=202609241736"></script>
 </body>
 </html>
 
