@@ -465,6 +465,66 @@ function renderChat(){
   if(searching) applyChatSearch(true); else log.scrollTop = log.scrollHeight;
 }
 
+/* ---------- chat checkpoints + fork ----------
+   Named snapshots of the active conversation, stored on its convo entry.
+   Restore parks the current state as an auto-checkpoint first (nothing is
+   lost); fork copies a snapshot into a NEW conversation and switches to it.
+   Borrowed concept: DigitalOcean Managed Agents' pause/resume/fork - here it
+   is all local, inside the encrypted store. */
+function cpList(){ const c=S().convos.find(x=>x.id===S().activeConvo); if(!c.checkpoints) c.checkpoints=[]; return c.checkpoints; }
+async function cpSave(name){
+  const cps=cpList();
+  cps.unshift({id:"cp"+Date.now().toString(36), name:name||("State "+new Date().toLocaleString([], {month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})), ts:new Date().toISOString(), chat:JSON.parse(JSON.stringify(S().chat))});
+  while(cps.length>10) cps.pop();
+  await Store.save();
+}
+async function cpRestore(id){
+  const cps=cpList(), cp=cps.find(x=>x.id===id); if(!cp) return;
+  if(S().chat.length){ await cpSave("Before restore - auto"); }
+  S().chat=JSON.parse(JSON.stringify(cp.chat));
+  await Store.save(); renderChat(); renderConvos();
+  toast("Restored: "+cp.name);
+}
+async function cpFork(id){
+  const cps=cpList(), cp=cps.find(x=>x.id===id); if(!cp) return;
+  parkActiveConvo();
+  const s=S(), nid="c"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);
+  s.convos.unshift({id:nid, name:(cp.name||"Checkpoint")+" (fork)", _auto:false, created:new Date().toISOString(), updated:new Date().toISOString(), chat:[]});
+  s.chat=JSON.parse(JSON.stringify(cp.chat)); s.activeConvo=nid;
+  await Store.save(); renderChat(); renderConvos();
+  toast("Forked into a new chat.");
+}
+async function cpDelete(id){
+  const cps=cpList(), i=cps.findIndex(x=>x.id===id); if(i<0) return;
+  cps.splice(i,1); await Store.save(); renderCheckpoints();
+}
+function renderCheckpoints(){
+  const cps=cpList();
+  const el=$("#cplist"); if(!el) return;
+  el.innerHTML = cps.length ? cps.map(cp=>{
+    const n=(cp.chat||[]).filter(m=>m.role==="user"||m.role==="muse").length;
+    return `<div class="cprow">
+      <div class="cpinfo"><b>${esc(cp.name)}</b><span class="small">${fmtT(cp.ts)} - ${n} messages</span></div>
+      <div class="cpacts">
+        <button class="btn" data-cprestore="${cp.id}">Restore</button>
+        <button class="btn" data-cpfork="${cp.id}">Fork</button>
+        <button class="btn badb" data-cpdel="${cp.id}">Delete</button>
+      </div></div>`;
+  }).join("") : `<div class="small" style="color:var(--dim2)">No checkpoints yet. Save one before a big turn - you can always come back.</div>`;
+  $$("#cplist [data-cprestore]").forEach(b=>b.onclick=async()=>{ await cpRestore(b.dataset.cprestore); closeModal(); });
+  $$("#cplist [data-cpfork]").forEach(b=>b.onclick=async()=>{ await cpFork(b.dataset.cpfork); closeModal(); });
+  $$("#cplist [data-cpdel]").forEach(b=>b.onclick=()=>cpDelete(b.dataset.cpdel));
+}
+$("#checkpointsbtn").addEventListener("click", ()=>{
+  ensureConvos();
+  openModal(`<h3>Checkpoints</h3>
+    <div class="small" style="color:var(--dim);margin-bottom:10px">Named save-states of this chat. Restore jumps back (your current state is auto-saved first); Fork opens the snapshot as a new chat and keeps this one too.</div>
+    <div class="trow" style="margin-bottom:12px"><input id="cpnewname" placeholder="Name this state - e.g. before the rewrite" maxlength="48"><button class="btn pri" id="cpsavebtn">Save state</button></div>
+    <div id="cplist"></div>`);
+  $("#cpsavebtn").onclick=async()=>{ await cpSave($("#cpnewname").value.trim()); renderCheckpoints(); renderConvos(); toast("Checkpoint saved."); };
+  renderCheckpoints();
+});
+
 /* ---------- conversations (multi-session chat) ----------
    Invariant: the ACTIVE conversation's messages live in S().chat; every other
    conversation keeps its messages in its convo entry's .chat. Switching parks

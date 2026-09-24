@@ -589,3 +589,13 @@ html[data-theme] select{padding-right:28px;background-image:linear-gradient(45de
 .searchother{border:1px solid var(--line);background:var(--panel);color:var(--dim);font:inherit;font-size:11.5px;border-radius:999px;padding:3px 10px;cursor:pointer}
 .searchother:hover{border-color:var(--acc);color:var(--acc)}
 .searchother b{color:var(--acc)}
+
+/* ---------- checkpoints ---------- */
+.cprow{display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px dashed var(--line)}
+.cprow:last-child{border-bottom:0}
+.cpinfo{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.cpinfo b{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cpacts{display:flex;gap:6px;flex:none}
+.cpacts .btn{font-size:11.5px;padding:4px 10px}
+#cpnewname{flex:1}
+@media (max-width:520px){.cprow{flex-direction:column;align-items:stretch;gap:7px}.cpacts{justify-content:flex-end}}
