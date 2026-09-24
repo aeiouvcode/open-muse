@@ -1,6 +1,12 @@
 # CURRENT_TASK — Open Muse (updated 2026-09-23 17:42 IST)
 
-## Status: engine live; search + branches + sessions + checkpoints shipped
+## Status: engine live; search + branches + sessions + checkpoints + team templates shipped
+Team templates deployed as af0993f; File gen 17 PUBLISHED (PRIVATE, revision
+filerevision-01M39N1ZBHME1XDYT0EQRGMJHH): Share team / Import team in the
+Workforce roster - one JSON file carries custom agents + automations, import
+validates format, skips name dupes (incl. built-ins), caps at 50 each,
+regenerates ids, coerces bad cadences to daily. Earlier: checkpoints 7e0d224
+(gen 16), sessions 60fc882 (gen 15).
 Checkpoints deployed as 7e0d224; File gen 16 PUBLISHED (PRIVATE, revision
 filerevision-01M3915NN54H3A1812VBQD2VXC): named chat save-states, restore
 (auto-saves current first), fork-into-new-chat. Earlier: sessions 60fc882
@@ -37,12 +43,12 @@ LibreChat (leading open ChatGPT-style app) + Jan (on-device reference). Plan
 reported to parent 20:18 IST. Roadmap, in order:
 1. Shareable workforce templates as JSON export/import (borrows OpenMausBot
    community team templates).
-2. Per-agent sandbox scopes for roster agents (borrows per-bot sandbox VM;
+1. Per-agent sandbox scopes for roster agents (borrows per-bot sandbox VM;
    honestly labeled same-tab isolation).
-3. Credential broker formalization (single egress gate, per-scope key access,
+2. Credential broker formalization (single egress gate, per-scope key access,
    key use in audit log).
-4. PWA manifest + install prompt (honest answer to native mobile).
-5. Default-model eval (SmolLM2-360M vs Qwen3-0.6B) + WebGPU on real GPU.
+3. PWA manifest + install prompt (honest answer to native mobile).
+4. Default-model eval (SmolLM2-360M vs Qwen3-0.6B) + WebGPU on real GPU.
 Not chasing (impossible for a static page, would betray the pitch): real
 microVMs, server-side agents that run while closed, hosted sync.
 

@@ -1,8 +1,7 @@
-# CHECKPOINT - 2026-09-24 11:56 IST
-- Cycle: chat checkpoints + fork shipped (7e0d224, live bytes verified) +
-  File gen 16 PUBLISHED (PRIVATE) after local-Chrome QA (save/restore/
-  auto-save-on-restore/fork/delete/persist, zero console errors).
-- Workspace was rebuilt this run: re-cloned repo, reinstalled puppeteer-core,
-  File port restored via file checkout of the published revision.
-- Roadmap: next = shareable workforce templates (JSON export/import).
+# CHECKPOINT - 2026-09-24 17:39 IST
+- Cycle: shareable team templates shipped (af0993f, live bytes verified) +
+  File gen 17 PUBLISHED (PRIVATE) after local-Chrome QA (export download,
+  import merge with dupe-skip, bad-file rejection, zero console errors).
+- Roadmap: next = per-agent sandbox scopes, then credential broker
+  formalization, PWA, default-model eval + WebGPU on real hardware.
 - Local repo clean, synced to origin/main.
