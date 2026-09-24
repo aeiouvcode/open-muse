@@ -48,6 +48,7 @@ This cycle shipped conversation search (top of the competitor-critique queue).
   version washed out the user bubble - fixed before ship).
 
 ## Instinct File
+Gen 18 PUBLISHED (PRIVATE, revision filerevision-01M3AA2BMG55Z8BXHMFRZ6WCD7) after local-Chrome preview QA (7/7: scope rows, defaults, toggle, engine option hidden, zero console errors).
 Gen 13 PUBLISHED (PRIVATE): https://files.instinct.com/file-01M326APAT2KA6SM3C2HG5XAEB
 Engine excluded from the File (see HANDOFF). File port at
 /home/sandbox/open-muse-file regenerates openmuse.ts/body.ts/style.css from
