@@ -16,6 +16,7 @@ Open Muse: a local-first, zero-backend, BYO-key AI chat/workbench. Static site, 
 ## Repo layout
 - `index.html` — shell; contains the `app.js?v=` / `styles.css?v=` cache-busts (bump both on every push).
 - `app.js` — the whole app (chat, providers, settings, workforce/team/swarm, studio, storage).
+  - Credentials: ALL keys are spent through `Broker` (app.js, search "credential broker"). Never attach a key outside it: name the credential + URL, the broker checks the origin, attaches the secret, audits, and refuses wrong hosts. Add new key-using services as a CREDS entry, not a new fetch.
 - `styles.css` — all styling. 390px phone-first.
 - `studio-frame.html` — sandboxed iframe host for user-built miniapps (opaque origin, `connect-src 'none'`).
 - `edge-bridge-contract.html`, `docs/`, `fonts/` (bundled woff2, CSP allows only self + declared origins).
@@ -51,9 +52,10 @@ File `file-01M326APAT2KA6SM3C2HG5XAEB` (PRIVATE) is a separate port project (`/h
   Bump both in the same commit.
 - The SW never caches cross-origin traffic: provider calls, tool fetches
   and engine weight downloads pass straight through. Do not add them.
-- applyNetPolicy rewrites the CSP meta at boot from CSP_TIGHT in app.js -
-  any CSP change must be made in BOTH index.html and CSP_TIGHT (this bit
-  us once: manifest-src was stripped at boot).
+- The shipped CSP meta in index.html is the single source of the tight
+  policy. applyNetPolicy captures it once and derives open-network mode by
+  widening only connect-src - edit the policy in index.html ONLY; there is
+  no second copy to drift.
 - Update flow: new SW waits -> #updatebar -> Update posts SKIP_WAITING ->
   controllerchange (only swaps after the first; first-install claim is
   ignored) -> reload once -> toast via sessionStorage flag.

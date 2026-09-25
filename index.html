@@ -15,7 +15,7 @@
 <meta name="apple-mobile-web-app-title" content="Open Muse">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<link rel="stylesheet" href="styles.css?v=202609250100">
+<link rel="stylesheet" href="styles.css?v=202609252115">
 </head>
 <body>
 <button id="menubtn" title="Menu">☰</button>
@@ -96,6 +96,7 @@
       <div id="chatlog"></div>
       <div id="composer">
         <textarea id="chatinput" placeholder="Tell Muse what needs to get done..." rows="1"></textarea>
+        <button class="btn iconbtn" id="micbtn" hidden title="Dictate - transcription uses this browser's speech service" aria-label="Dictate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
         <button id="stopbtn" hidden title="Stop the reply">Stop</button>
         <button id="sendbtn">Send</button>
       </div>
@@ -163,6 +164,13 @@
         <div class="toolgrid" id="toolgrid"></div>
         <div class="trow" style="margin-bottom:8px"><button class="btn" id="buildtoolbtn">+ Have Muse build a tool</button>
           <span class="small" style="color:var(--dim2);font-size:12px">Muse writes the code, gates it, sandbox-tests it - you approve before it joins the registry.</span></div>
+        <div class="tsec">
+          <h3>Prompt library</h3>
+          <div class="small">Prompts you reach for often - one tap drops one into the composer, ready to edit or send. Stored in your VM like everything else.</div>
+          <div id="promptlist"></div>
+          <div class="trow"><input id="prompttitle" placeholder="Name - e.g. Weekly review" maxlength="60"><button class="btn" id="promptsave">Save composer text</button></div>
+          <div class="trow"><textarea id="prompttext" placeholder="...or write the prompt here" rows="2" style="flex:1"></textarea><button class="btn" id="promptadd">Add</button></div>
+        </div>
         <div class="tsec">
           <h3>Web search</h3>
           <div class="small">Live search through your own key. TinyFish's key is free with no card and also powers page fetches; Tavily has a free monthly tier; Brave has a free credit tier. The key stays inside your VM.</div>
@@ -250,7 +258,8 @@
           <div class="small" style="font-size:11.5px;color:var(--dim2);margin-top:4px">Ollama listens on 11434, LM Studio on 1234. The model list refresh reads what your server has.</div></div>
         <div class="field"><label id="keylabel">API key (stored in this browser only, sent only to your provider)</label>
           <input type="password" id="setkey" autocomplete="off" placeholder="sk-or-...">
-          <div class="small" id="keyhint" style="font-size:11.5px;color:var(--dim2);margin-top:4px"></div></div>
+          <div class="small" id="keyhint" style="font-size:11.5px;color:var(--dim2);margin-top:4px"></div>
+          <div class="small" style="font-size:11.5px;color:var(--dim2);margin-top:6px">Every key - model, search, Monid, MCP server - is spent through one credential broker: it attaches the key itself, only to that service's own address, logs each use (and every refused destination) in the Audit trail, and keeps keys out of the rest of the code. It stops accidents and sloppy code paths; like any in-app guard, it is hygiene, not a hardware vault.</div></div>
         <div class="field" style="display:flex;gap:9px;align-items:center">
           <input type="checkbox" id="setsavekey" style="width:auto">
           <label for="setsavekey" style="margin:0;display:inline;font-size:13px">Remember key on this device (kept inside your Personal VM - encrypted when a passphrase is set)</label></div>
@@ -269,12 +278,22 @@
           <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
             <button class="btn" id="engineload">Load model</button>
             <button class="btn" id="engineunload" hidden>Unload</button>
+            <button class="btn" id="enginebench" hidden>Benchmark</button>
           </div>
           <div id="engineprog" style="margin-top:8px"></div>
+          <div id="enginebenchout" style="margin-top:2px"></div>
           <input id="enginecustom" placeholder="or a custom Hugging Face repo - e.g. onnx-community/Qwen3-4B-Instruct-ONNX" autocomplete="off" spellcheck="false" style="margin-top:8px">
           <div class="small" style="font-size:11.5px;color:var(--dim2);margin-top:6px">Runs fully on this device - WebGPU when available, plain WASM otherwise (slower, works everywhere). The first load downloads the weights once from Hugging Face; after that they come from this browser's cache and work offline. Custom repos need a q4 (WASM) or q4f16 (WebGPU) ONNX variant to load. Nothing you type ever leaves this device on this engine.</div></div>
         <div class="field"><label>Personal VM passphrase (optional - encrypts local storage with a key only you hold)</label>
           <input type="password" id="setpass" autocomplete="new-password" placeholder="leave blank to keep storage unencrypted"></div>
+        <div class="field"><label>Backup</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn" id="backupexport">Export backup</button>
+            <button class="btn" id="backupimport">Import backup</button>
+            <input type="file" id="backupfile" accept="application/json,.json" style="display:none">
+          </div>
+          <div id="backupout" style="margin-top:6px"></div>
+          <div class="small" style="font-size:11.5px;color:var(--dim2);margin-top:6px">One JSON file with everything: chats, goals, habits, memory, workforce, automations, tools, studio apps, audit. Keys never leave the device - API keys, MCP keys and privacy-cloak originals are NOT in the file, so it is safe to store anywhere. Importing replaces the current data after showing exactly what it will restore.</div></div>
         <div class="field"><label style="display:flex;gap:9px;align-items:center;font-size:13px"><input type="checkbox" id="cloakon" style="width:auto"><span>Privacy cloak - swap private data for synthetic twins before anything leaves this browser</span></label>
           <div class="small" style="font-size:12px;color:var(--dim);margin-top:6px">When on, every outbound model call - chat, goals, teams, automations, everything - is scrubbed first: emails, phone numbers and card/ID numbers are detected automatically, and anything you teach below is cloaked too. Each real value gets one consistent synthetic twin, so the model still reasons over coherent text. Replies are un-swapped before you see them, so you always read your real data. Twins live only in this browser's store - encrypted when a passphrase is set - and audit logs record counts, never values.</div>
           <div id="cloakrules" style="margin-top:8px"></div>
@@ -348,7 +367,7 @@
   <button class="btn" id="updatelater">Later</button>
 </div>
 <div class="toast" id="toast"></div>
-<script src="app.js?v=202609250100"></script>
+<script src="app.js?v=202609252115"></script>
 </body>
 </html>
 

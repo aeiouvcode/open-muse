@@ -105,6 +105,9 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0;background:radi
 .btn:disabled{opacity:.45;cursor:default}
 #composer{border-top:1px solid var(--line);padding:14px var(--pad);display:flex;gap:10px;align-items:flex-end}
 #composer textarea{flex:1;resize:none;min-height:46px;max-height:160px}
+#micbtn{min-width:46px;min-height:46px;align-self:stretch}
+#micbtn.listening{color:#fff;background:var(--acc,#bc4518);animation:micpulse 1.6s ease-in-out infinite}
+@keyframes micpulse{0%,100%{opacity:1}50%{opacity:.65}}
 #sendbtn{background:var(--acc);border-radius:6px;padding:11px 16px;color:#fff;font-weight:600}
 #sendbtn:disabled{opacity:.4}
 .typing{display:inline-flex;gap:4px;padding:4px 0}

@@ -1,4 +1,64 @@
-# CURRENT_TASK — Open Muse (updated 2026-09-25 00:45 IST)
+# CURRENT_TASK — Open Muse (updated 2026-09-25 21:20 IST)
+
+## Status: prompt library shipped (gen 25); FLEET GO - deploy at 00:30 IST
+Gen 26 (this cycle): voice input - composer mic, honest about the browser
+speech service, every state human. Deploy wake 00:30 IST covers gen 20-26.
+
+Deploy hold LIFTED 2026-09-25 20:54 IST (user "ship go"). One-shot wake
+00:30 IST pushes gen 20-25 to Pages + verifies live bytes.
+Gen 25 (this cycle): prompt library (save / one-tap use / delete / backup);
+also fixed switchView never re-rendering the tools view.
+
+## Status: backup/export-import shipped (gen 24); deploys HELD pending fresh go
+Gen 24 (this cycle): full backup - one JSON out, confirmed replace back in,
+secrets structurally excluded. Local-first is now actually portable.
+
+## Status: fleet surface standards shipped (gen 23); deploys HELD pending fresh go
+Gen 23 (this cycle): 404.html + humanError() everywhere errors reach the UI +
+surface standards folded into the in-app self-test suite and FEATURE-MAP.
+
+## Status: on-device benchmark shipped (gen 22); deploys HELD pending fresh go
+Gen 22 (this cycle): engine-panel Benchmark - fixed battery against the loaded
+model (exact-instruction / arithmetic / JSON / speed), results per model in
+settings.bench, honest failure display, audited. Real-weight run inconclusive
+in the sandbox (no WebGPU; WASM load stalled post-download) - default-model
+call (SmolLM2-360M vs Qwen3-0.6B) now answerable on the user's device with one
+tap, which was the point. Competitor note: Jan/LM Studio guess fit from specs
+(janhq/jan#5505 is an open request); we measure.
+
+## Status: CSP single-sourced (gen 21); broker shipped (gen 20); deploys HELD pending fresh go
+DEPLOY HOLD (main, 2026-09-25 17:37 IST): no Pages/GitHub push without a fresh
+explicit go from Naksh - the standing grant is suspended fleet-wide. File
+publishes (PRIVATE) continue. Gen 20 commit 7924ec5 + gen 21 staged locally.
+Gen 21 (this cycle): CSP single-source - the shipped index.html meta is the
+only copy of the tight policy; applyNetPolicy derives open mode by widening
+only connect-src. The gen-19 "edit both" class of bug is structurally
+impossible now. Also new this cycle per owner guidance: FEATURE-MAP.md (added
+in gen 20 commit) - sitemap of features + triggers, updated on every behavior
+change; engineering rules: empirical verification, highest-level fixes for
+recurring patterns, no workaround-justifying comments.
+
+## Status: credential broker formalized (gen 20); app is installable + offline-capable
+Credential broker shipped (this cycle, gen 20): every credential in the app -
+model key, search key (Brave/Tavily/TinyFish), Monid key, per-server MCP keys -
+is now spent through one chokepoint (Broker, app.js ~line 912). Callers name a
+credential and a URL; the broker validates the destination host against that
+credential's allowed origins (derived live from the active provider's
+endpoints / search provider / server URL), attaches the secret itself (Bearer
+header, ?key= query for Gemini's catalog, api_key JSON-body field for Tavily),
+audits each new credential->origin pair once per session, and refuses - with
+an audit entry and a human error - anything else. Key-touching code outside
+the broker: zero (grep-verified; getKey() survives only as the broker's read
+and the settings writer). Presence gates moved to Broker.has(). Settings copy
+states the boundary honestly: hygiene against accidents and sloppy code paths,
+not a process barrier. QA: 22/22 stubbed-provider assertions (Bearer only to
+the provider's own host, query-key only on Gemini's catalog host, body-key only
+for Tavily, cross-origin refusal throws + never sends + audits, UI send
+round-trip, settings save flow), plus gen-18 workforce and gen-19 PWA
+regressions green at 390px.
+Earlier: PWA gen 19, agent scopes 6962864 (gen 18), team templates af0993f
+(gen 17), checkpoints 7e0d224 (gen 16), sessions 60fc882 (gen 15), branches
+0e7b349 (gen 14), search (gen 13). Engine proven live 2026-09-23 ~16:02 IST.
 
 ## Status: engine live; app is now installable + offline-capable (gen 19)
 PWA shipped (this cycle, gen 19): Open Muse is a real installable app.

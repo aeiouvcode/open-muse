@@ -1,15 +1,20 @@
-# CHECKPOINT - 2026-09-25 00:45 IST
-- Cycle COMPLETE: PWA shipped + deployed + File gen 19 PUBLISHED (PRIVATE,
-  revision filerevision-01M3ADD6DFER8FWAY0847RJ6GF). Manifest + maskable
-  icons, versioned SW precache (offline boot, API traffic never cached),
-  consent-based update bar with old-cache purge + post-update toast,
-  install prompt (native / iOS instruction), "This app" settings row that
-  hides inside the hosted File. QA: 5/5 shell checks (manifest, SW
-  control, offline boot, settings row, install flow) + 4/4 update e2e
-  (bar, new cache, old purge, toast) + 6/6 File preview, zero real console
-  errors. Two real bugs found by QA and fixed: runtime CSP rewrite
-  stripping manifest-src, first-install spurious reload.
-- Deploy rule (new): sw.js VERSION must equal index.html ?v= - bump both
-  together every deploy (HANDOFF has the details).
-- Roadmap: credential-broker formalization, then default-model eval
-  (SmolLM2-360M vs Qwen3-0.6B) + WebGPU on real hardware.
+# CHECKPOINT - 2026-09-25 21:20 IST
+- Gen 26 COMPLETE locally: voice input. Composer mic button, shown only
+  where the browser exposes a speech service; tap to dictate (existing text
+  kept, interim results stream in), tap to stop. Every state honest:
+  unsupported = no button, denied = how to allow, offline = says the browser
+  transcribes on its own service. Dictation is audited (kind "voice"),
+  never the transcript content.
+- QA: 7/7 (hidden without API, visible with, listening state, text appended
+  to existing draft, audit, clean stop, denied->human copy) + broker 22/22
+  at 390px, zero page errors.
+- Security pass: PASS - no keys, no app-side network; the honest copy names
+  the browser's speech service as the processor, and nothing but the audit
+  kind is logged.
+- Self-critique: no push-to-talk language setting yet (uses browser
+  language); continuous mode can hang on some mobile browsers - stop is one
+  tap and onend always clears state.
+- Competitor note vs LibreChat/Jan: both bolt voice on as a paid/cloud
+  afterthought or lack it; ours is native, zero-config, and honest about who
+  transcribes.
+- Deploy: 00:30 IST wake pushes gen 20-26 (7924ec5..) + verifies live bytes.

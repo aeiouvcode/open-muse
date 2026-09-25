@@ -104,7 +104,7 @@ const S = () => Store.raw;
 
 /* model providers - OpenAI-compatible chat completions shape */
 const PROVIDERS = {
-  gemini:      { name:"Gemini",       url:"https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", nativeCatalog:"https://generativelanguage.googleapis.com/v1beta/models?pageSize=100&key=", defModel:"gemini-3.8-flash", keyPh:"AIza...", hint:"free key from aistudio.google.com/apikey - the most reliable free tier, called straight from this browser", hintHtml:'free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> - the most reliable free tier, called straight from this browser', authCatalog:true,
+  gemini:      { name:"Gemini",       url:"https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", nativeCatalog:"https://generativelanguage.googleapis.com/v1beta/models?pageSize=100", defModel:"gemini-3.8-flash", keyPh:"AIza...", hint:"free key from aistudio.google.com/apikey - the most reliable free tier, called straight from this browser", hintHtml:'free key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a> - the most reliable free tier, called straight from this browser', authCatalog:true,
                  fallback:["gemini-3.8-flash","gemini-3.7-flash","gemini-3.6-flash","gemini-3.5-flash","gemini-3.5-flash-lite","gemini-3-flash-preview","gemini-3.1-pro-preview","gemini-3-pro-preview","gemini-3.1-flash-lite","gemini-3.1-flash-lite-preview","gemini-2.5-pro","gemini-2.5-flash","gemini-2.5-flash-lite","gemini-2.5-flash-preview-09-2025","gemini-2.0-flash","gemini-2.0-flash-lite","gemini-flash-latest"] },
   engine:      { name:"On-device (built-in)", builtin:true, defModel:"", keyPh:"no key needed", hint:"Muse's own engine runs the model right here in this app - WebGPU when your device has it, plain WASM otherwise. Weights download once from Hugging Face, then it works offline. Nothing you type ever leaves this device.",
                  fallback:[] },
@@ -401,8 +401,9 @@ function switchView(name){
   $$(".view").forEach(v=>v.classList.toggle("on", v.id==="view-"+name));
   if(name==="settings"){ $("#setprovider").value = S().settings.provider || "openrouter"; $("#setsavekey").checked = !!S().settings.keyStored; $("#setstrip").checked = S().settings.statusStrip !== false; syncProviderUI(); populateModelSelect(); renderEngine(); renderCloak(); }
   if(name==="evolve") renderEvolutions();
+  if(name==="tools") renderTools();
 }
-function renderAll(){ renderConvos(); renderGoals(); renderMemory(); renderConnectors(); renderAudit(); renderStatus(); renderChat(); renderCoderWorkbench(); renderEvolutions(); renderTasks(); renderRems(); renderTools(); renderSkills(); renderMcps(); renderStudio(); renderWorkforce(); renderHabits(); renderCloak(); }
+function renderAll(){ renderPrompts(); renderConvos(); renderGoals(); renderMemory(); renderConnectors(); renderAudit(); renderStatus(); renderChat(); renderCoderWorkbench(); renderEvolutions(); renderTasks(); renderRems(); renderTools(); renderSkills(); renderMcps(); renderStudio(); renderWorkforce(); renderHabits(); renderCloak(); }
 
 /* ---------------- chat ---------------- */
 function addMsg(role, text, kind){
@@ -907,6 +908,103 @@ const EdgeBridge = {
 
 /* ---------------- model ---------------- */
 function getKey(){ return sessionStorage.getItem("openmuse.key") || (S() && S().settings.keyStored) || ""; }
+
+/* ---------------- credential broker ----------------
+   Every credential in the app - model key, search key, Monid key, per-server
+   MCP keys - is spent through this one chokepoint. Callers name a credential
+   and a URL; the broker checks the destination against that credential's
+   allowed origins, attaches the secret itself (header, query param, or JSON
+   body field), audits each new credential->origin pair once per session, and
+   refuses - with an audit entry - anything else. Keys never appear in caller
+   code, logs, or error text by construction.
+   Honest boundary: this is same-tab hygiene, not a process barrier. It
+   removes accidental leakage (wrong origin, logs, error copy) by
+   construction; it does not defend against a compromised same-origin script
+   - nothing in a web page can. */
+const Broker = (()=>{
+  const seen = new Set();  // cred->host pairs already audited this session
+  function modelHosts(){
+    const p = provider(); const hosts = new Set();
+    const add = u => { try{ if(u) hosts.add(new URL(u).host); }catch(e){} };
+    if(p.local) add((S() && S().settings.localUrl) || "http://localhost:11434/v1");
+    else if(p.nim) add((S() && S().settings.nimUrl) || "http://localhost:8000/v1");
+    else { add(p.url); add(p.modelsUrl); add(p.nativeCatalog); }
+    return hosts;
+  }
+  const CREDS = {
+    model: {
+      label: ()=> provider().name + " key",
+      read: ()=> getKey(),
+      hosts: modelHosts,
+      attach(url, headers, key, opts){
+        if(opts && opts.via==="query"){
+          if(url.host!=="generativelanguage.googleapis.com") throw new Error("broker-style");
+          url.searchParams.set("key", key);
+        } else headers.set("Authorization", "Bearer "+key);
+      }
+    },
+    search: {
+      label: ()=> ((S()&&S().settings.searchProvider)||"search") + " key",
+      read: ()=> (S() && S().settings.searchKey) || "",
+      hosts(){
+        const pv=(S() && S().settings.searchProvider)||"tavily";
+        return new Set(pv==="brave" ? ["api.search.brave.com"]
+          : pv==="tinyfish" ? ["api.search.tinyfish.ai","api.fetch.tinyfish.ai"]
+          : ["api.tavily.com"]);
+      },
+      attach(url, headers, key, opts){
+        const pv=(S() && S().settings.searchProvider)||"tavily";
+        if(pv==="brave") headers.set("X-Subscription-Token", key);
+        else if(pv==="tinyfish") headers.set("X-API-Key", key);
+        /* tavily carries the key in the JSON body - handled below via bodyKey */
+      }
+    },
+    monid: {
+      label: ()=> "Monid key",
+      read: ()=> (S() && S().settings.monidKey) || "",
+      hosts: ()=> new Set(["api.monid.ai"]),
+      attach(url, headers, key){ headers.set("Authorization", "Bearer "+key); }
+    }
+  };
+  async function use(credId, url, init, opts){
+    const c = CREDS[credId]; if(!c) throw new Error("broker: unknown credential");
+    init = init || {}; opts = opts || {};
+    let u; try{ u = new URL(url); }catch(e){ throw new Error("broker: unreadable URL"); }
+    if(!c.hosts().has(u.host)){
+      await audit("broker", `Refused to send the ${c.label()} to ${u.host} - not an allowed origin for it`);
+      throw new Error(`The credential broker stopped a request: ${u.host} is not where this key is allowed to go. Nothing was sent.`);
+    }
+    const headers = new Headers(init.headers || {});
+    const key = c.read();
+    if(key){
+      if(opts.bodyKey){
+        let b = {}; try{ b = JSON.parse(init.body || "{}"); }catch(e){}
+        b[opts.bodyKey] = key;
+        init = Object.assign({}, init, { body: JSON.stringify(b) });
+      } else c.attach(u, headers, key, opts);
+    }
+    const mark = credId + "->" + u.host;
+    if(!seen.has(mark)){ seen.add(mark); await audit("broker", `Key in use: ${c.label()} -> ${u.host}`); }
+    return fetch(u.toString(), Object.assign({}, init, { headers }));
+  }
+  /* MCP servers carry their own per-server key, allowed only to that server */
+  async function useMcp(srv, url, init){
+    init = init || {};
+    let u; try{ u = new URL(url); }catch(e){ throw new Error("broker: unreadable URL"); }
+    let srvHost; try{ srvHost = new URL(srv.url).host; }catch(e){ throw new Error("broker: bad server URL"); }
+    if(u.host !== srvHost){
+      await audit("broker", `Refused to send the "${srv.name}" server key to ${u.host}`);
+      throw new Error(`The credential broker stopped a request: ${u.host} is not the "${srv.name}" server. Nothing was sent.`);
+    }
+    const headers = new Headers(init.headers || {});
+    if(srv.key) headers.set("Authorization", "Bearer "+srv.key);
+    const mark = "mcp:"+srv.name+"->"+u.host;
+    if(!seen.has(mark)){ seen.add(mark); await audit("broker", `Key in use: MCP server "${srv.name}" -> ${u.host}`); }
+    return fetch(u.toString(), Object.assign({}, init, { headers }));
+  }
+  function has(credId){ const c = CREDS[credId]; return !!(c && c.read()); }
+  return { use, useMcp, has };
+})();
 /* ---------------- built-in on-device engine (transformers.js, vendored) ----------------
    Models run in engine-worker.js on ONNX Runtime Web. Weights come from
    Hugging Face once and then from the browser cache; prompts never leave
@@ -1059,9 +1157,20 @@ function friendlyModelError(e){
   return "Model call failed: "+m.slice(0,140);
 }
 
+/* humanError: the only path from a thrown error to the screen. Takes the
+   first line, drops anything that smells like a stack frame, JSON blob or
+   internal path, and falls back to plain copy when nothing human is left.
+   Raw stack traces never reach the UI. */
+function humanError(e, fallback){
+  let m = String(e && e.message || e || "").split("\n")[0];
+  if(/^\s*[{\[]/.test(m) || /\bat [\w<>.$]+ \(|node_modules|chrome-extension:\/\/|\.js:\d+:\d+/.test(m)) m = "";
+  m = m.replace(/\s+/g," ").trim().slice(0,140);
+  if(m.length < 3) return fallback || "Something went wrong - try again.";
+  return m;
+}
 async function chatStream(messages, onTok, signal){
-  const key=getKey(); const prov=provider(); const ep=provEndpoints();
-  if(!key && !prov.local && !prov.edge && !prov.nim && !prov.builtin) throw new Error("no-key");
+  const prov=provider(); const ep=provEndpoints();
+  if(!Broker.has("model") && !prov.local && !prov.edge && !prov.nim && !prov.builtin) throw new Error("no-key");
   if((prov.local || prov.nim) && !activeModel()) throw new Error("no-model");
   if(prov.builtin){
     // on-device: nothing leaves the browser, so there is nothing to cloak
@@ -1077,8 +1186,6 @@ async function chatStream(messages, onTok, signal){
     const t = await EdgeBridge.infer(messages, {stream:true, model:em, onTok: acc=>{ onTok && onTok(Cloak.back(acc)); }});
     return Cloak.back(t);
   }
-  const headers = { "Content-Type":"application/json" };
-  if(key) headers["Authorization"] = "Bearer " + key;
   // stall watchdog: the user stop signal is external; an inner controller lets
   // us abort ourselves when the provider goes quiet (connects, then nothing)
   const inner=new AbortController();
@@ -1090,9 +1197,9 @@ async function chatStream(messages, onTok, signal){
   },2000);
   let r;
   try{
-    r = await fetch(ep.url, {
+    r = await Broker.use("model", ep.url, {
       method:"POST",
-      headers,
+      headers:{ "Content-Type":"application/json" },
       signal: inner.signal,
       body: JSON.stringify({ model: activeModel(), messages, stream:true, temperature:0.7 })
     });
@@ -1127,8 +1234,8 @@ async function chatStream(messages, onTok, signal){
   return Cloak.back(out);
 }
 async function chatOnce(messages, json, model){
-  const key=getKey(); const prov=provider(); const ep=provEndpoints();
-  if(!key && !prov.local && !prov.edge && !prov.nim && !prov.builtin) throw new Error("no-key");
+  const prov=provider(); const ep=provEndpoints();
+  if(!Broker.has("model") && !prov.local && !prov.edge && !prov.nim && !prov.builtin) throw new Error("no-key");
   if((prov.local || prov.nim) && !(model || activeModel())) throw new Error("no-model");
   if(prov.builtin){
     const em = model || activeModel() || LocalEngine.loadedModel || "";
@@ -1140,9 +1247,7 @@ async function chatOnce(messages, json, model){
   if(prov.edge){ const em = model || activeModel() || EdgeBridge.loadedModel || ""; if(!em) throw new Error("no-model"); return Cloak.back(await EdgeBridge.infer(messages, {model: em})); }
   const body={ model: model || activeModel(), messages, temperature:0.3 };
   if(json) body.response_format={type:"json_object"};
-  const headers = { "Content-Type":"application/json" };
-  if(key) headers["Authorization"] = "Bearer " + key;
-  const r=await fetch(ep.url,{method:"POST",headers,body:JSON.stringify(body)});
+  const r=await Broker.use("model", ep.url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
   if(!r.ok) throw new Error("model "+r.status);
   const j=await r.json();
   const ch=j.choices && j.choices[0];
@@ -1573,7 +1678,7 @@ async function sendChat(auto){
   // honesty gate: without a model key nothing past here can work - say so
   // plainly and point at the fix instead of pretending to answer.
   const keylessProv = !!provider().local || !!provider().edge || !!provider().nim || !!provider().builtin;
-  if(!getKey() && !keylessProv){
+  if(!Broker.has("model") && !keylessProv){
     await addMsg("muse", "I can't answer that yet - there is no model connected, so anything I said would be fake. Paste a **Gemini** key in Settings and everything starts working for real: chat, goals, plans, memory. The key is free and stays in this browser.");
     await addMsg("muse", `<div class="wactions"><button class="wchip" data-wa="settings">Set up a key</button><button class="wchip" data-wa="geminikey">Get a free Gemini key</button></div>`, "card");
     await Store.save(); renderAll(); return;
@@ -1585,7 +1690,7 @@ async function sendChat(auto){
     const nice=title.charAt(0).toUpperCase()+title.slice(1);
     await addMsg("muse", `On it. I'm turning “${nice}” into a plan - give me a few seconds.`);
     renderChat();
-    learnFrom(text).catch(async e=>audit("error","memory extraction failed: "+String(e).slice(0,120)));
+    learnFrom(text).catch(async e=>audit("error","memory extraction failed: "+humanError(e)));
     const g=await createGoal(nice);
     const words = nice.toLowerCase().split(/\W+/).filter(w=>w.length>3);
     const rel = retrieveMemory(text, 1).hits[0];
@@ -1646,7 +1751,7 @@ async function sendChat(auto){
     } else {
       await addMsg("muse", out); renderChat();
     }
-    learnFrom(text).catch(async e=>audit("error","memory extraction failed: "+String(e).slice(0,120)));
+    learnFrom(text).catch(async e=>audit("error","memory extraction failed: "+humanError(e)));
   }catch(e){
     el.remove(); stopBtn.hidden=true;
     if(ctl.signal.aborted){
@@ -1665,7 +1770,7 @@ async function sendChat(auto){
 
 /* memory extraction: small background call, durable facts only */
 async function learnFrom(userText){
-  if(!getKey()) return;
+  if(!Broker.has("model")) return;
   const raw=await chatOnce([
     {role:"system",content:`Extract durable personal facts worth remembering from the user's message (preferences, relationships, constraints, projects, goals). Output JSON: {"facts":["...",...]}. Facts must be third-person, specific, and useful later ("User is training for a 10k"). Skip transient chatter, questions, and anything already implied. Empty list if nothing durable.`},
     {role:"user",content:userText}
@@ -1689,14 +1794,14 @@ async function learnFrom(userText){
    from the conversation window since the last pass. Extraction reuses the
    Mem0-style loop, so dedupe/update applies. Runs only while a key is set. */
 async function distillSession(){
-  const s=S(); if(!s || !getKey()) return;
+  const s=S(); if(!s || !Broker.has("model")) return;
   const from = s.lastDistillIdx || 0;
   const fresh = s.chat.slice(from).filter(m=>m.role==="user" && !m.kind);
   if(fresh.length < 3) return;
   s.lastDistillIdx = s.chat.length;
   await Store.save();
   try{ await learnFrom(fresh.slice(-12).map(m=>m.text).join("\n").slice(0,2500)); }
-  catch(e){ await audit("error", "session distillation failed: "+String(e).slice(0,100)); }
+  catch(e){ await audit("error", "session distillation failed: "+humanError(e)); }
 }
 document.addEventListener("visibilitychange", ()=>{ if(document.visibilityState==="hidden") distillSession(); });
 
@@ -1819,11 +1924,10 @@ async function proactiveNudge(){
 /* ---------------- settings ---------------- */
 async function fetchCatalog(pv){
   const prov = PROVIDERS[pv] || PROVIDERS.openrouter;
-  const key = getKey();
-  if(prov.authCatalog && !key) return null;   // TH/NIM catalogs are auth-gated
+  if(prov.authCatalog && !Broker.has("model")) return null;   // TH/NIM catalogs are auth-gated
   if(prov.nativeCatalog){
     try{
-      const r = await fetch(prov.nativeCatalog + encodeURIComponent(key));
+      const r = await Broker.use("model", prov.nativeCatalog, {}, {via:"query"});
       if(!r.ok) return null;
       const j = await r.json();
       const ids = (j.models||[])
@@ -1835,7 +1939,7 @@ async function fetchCatalog(pv){
   }
   const mu = prov.local ? provEndpoints().modelsUrl : prov.modelsUrl;
   try{
-    const r = await fetch(mu, {headers: key ? {"Authorization":"Bearer "+key} : {}});
+    const r = await Broker.use("model", mu, {});
     if(!r.ok) return null;
     const j = await r.json();
     const ids = (j.data||[]).map(m=>m.id).filter(Boolean);
@@ -1877,7 +1981,7 @@ async function populateModelSelect(){
     else note = ids.length + " model" + (ids.length===1?"":"s") + " served locally - prompts never leave this device";
   } else {
     $("#setmodelcustom").hidden = true;
-    if(!ids){ ids = prov.fallback.slice(); fallbackOrder = true; note = prov.authCatalog && !getKey() ? "enter a key to load the full catalog - showing current models meanwhile" : "catalog unavailable - showing current models"; }
+    if(!ids){ ids = prov.fallback.slice(); fallbackOrder = true; note = prov.authCatalog && !Broker.has("model") ? "enter a key to load the full catalog - showing current models meanwhile" : "catalog unavailable - showing current models"; }
   }
   if(prov.nim){ $("#setmodelcustom").hidden = false; }
   // verified-working on this provider+key first, then :free, rest alphabetical
@@ -1919,7 +2023,7 @@ $("#testmodels").addEventListener("click", async ()=>{
   if(prov.builtin){ box.innerHTML=`<div class="small" style="color:var(--dim);margin-top:8px">The built-in engine's models verify themselves on load - pick one above and tap Load in the engine panel.</div>`; return; }
   if(prov.edge){ box.innerHTML=`<div class="small" style="color:var(--dim);margin-top:8px">On-device models load one at a time inside EDGE//AI - test them there instead.</div>`; return; }
   const keyless=!!prov.local||!!prov.nim;
-  if(!getKey() && !keyless){ box.innerHTML=`<div class="small" style="color:var(--dim);margin-top:8px">Paste your key above and Save first - then the tester can show what it actually reaches.</div>`; return; }
+  if(!Broker.has("model") && !keyless){ box.innerHTML=`<div class="small" style="color:var(--dim);margin-top:8px">Paste your key above and Save first - then the tester can show what it actually reaches.</div>`; return; }
   const ids=(MODEL_SELECT_CACHE.ids||[]).filter(Boolean);
   const q=($("#modelfilter").value||"").trim().toLowerCase();
   const list=q?ids.filter(id=>id.toLowerCase().includes(q)):ids;
@@ -1935,8 +2039,7 @@ $("#testmodels").addEventListener("click", async ()=>{
     const ctl=new AbortController(); const to=setTimeout(()=>ctl.abort(),20000);
     let st;
     try{
-      const headers={"Content-Type":"application/json"}; const k=getKey(); if(k) headers["Authorization"]="Bearer "+k;
-      const r=await fetch(ep.url,{method:"POST",headers,signal:ctl.signal,body:JSON.stringify({model:id,messages:[{role:"user",content:"Say OK"}],max_tokens:1,temperature:0})});
+      const r=await Broker.use("model", ep.url, {method:"POST", headers:{"Content-Type":"application/json"}, signal:ctl.signal, body:JSON.stringify({model:id,messages:[{role:"user",content:"Say OK"}],max_tokens:1,temperature:0})});
       const ms=Math.round(performance.now()-t0);
       if(r.ok){ const j=await r.json().catch(()=>null); st=(j&&Array.isArray(j.choices)&&j.choices.length)?{ok:true,ms}:{ok:false,why:"answered but sent no text"}; }
       else st={ok:false,why:mtReason(r.status)};
@@ -2004,12 +2107,223 @@ function renderEngine(){
   const st=$("#enginestate"), model=(S()&&S().settings.model)||"";
   if(LocalEngine.loadedModel){
     st.innerHTML="Loaded: <b>"+esc(LocalEngine.loadedModel.split("/").pop())+"</b> on "+esc(LocalEngine.device||"this device")+(LocalEngine.dtype?" ("+esc(LocalEngine.dtype)+")":"");
-    $("#engineunload").hidden=false; $("#engineload").textContent="Reload";
+    $("#engineunload").hidden=false; $("#engineload").textContent="Reload"; $("#enginebench").hidden=false;
+    renderEngineBench();
   } else {
     st.textContent=model&&ENGINE_MODELS.some(m=>m.id===model)?("Picked: "+model.split("/").pop()+" - not loaded yet."):"Pick a model above, then load it here.";
-    $("#engineunload").hidden=true; $("#engineload").textContent="Load model";
+    $("#engineunload").hidden=true; $("#engineload").textContent="Load model"; $("#enginebench").hidden=true;
   }
 }
+
+/* ---------------- on-device benchmark ----------------
+   Answers "which small model should I run" with this device's own evidence:
+   a fixed battery against the loaded model - speed (time to first token,
+   tokens/sec) plus three behavior checks (exact instruction, arithmetic,
+   JSON shape). Results persist per model in settings.bench and show in the
+   engine panel, so the default-model choice is measured, not folklore.
+   Numbers are this device's own - WASM and WebGPU differ by a lot. */
+const BENCH = [
+  { id:"exact", label:"follows an exact instruction", max:12,
+    msgs:[{role:"user",content:"Reply with exactly this token and nothing else: BENCH-OK"}],
+    check:t=>/BENCH-OK/.test(t) },
+  { id:"math", label:"does arithmetic", max:12,
+    msgs:[{role:"user",content:"What is 17+25? Reply with just the number."}],
+    check:t=>/\b42\b/.test(t) },
+  { id:"json", label:"emits a clean JSON shape", max:24,
+    msgs:[{role:"user",content:'Reply with only this JSON object and nothing else: {"ok":true}'}],
+    check:t=>{ try{ const m=t.match(/\{[\s\S]*\}/); return !!(m && JSON.parse(m[0]).ok===true); }catch(e){ return false; } } },
+  { id:"speed", label:"generation speed", max:80,
+    msgs:[{role:"user",content:"In two short sentences, why is the sky blue?"}],
+    check:null },
+];
+async function benchRun(){
+  const out=$("#enginebenchout"), btn=$("#enginebench");
+  if(!LocalEngine.loadedModel){ out.innerHTML='<div class="small" style="font-size:12px;color:var(--dim)">Load a model first - the benchmark measures the loaded one.</div>'; return; }
+  btn.disabled=true;
+  const model=LocalEngine.loadedModel, device=LocalEngine.device||"wasm", dtype=LocalEngine.dtype||"";
+  const res={ model, device, dtype, ts:nowISO(), checks:{}, tFirst:0, tokPerSec:0 };
+  let done=0;
+  const paint=()=>{ out.innerHTML='<div class="small" style="font-size:12px;color:var(--dim)">Benchmarking '+esc(model.split("/").pop())+' on '+esc(device)+' - '+done+' of '+BENCH.length+' checks...</div>'; };
+  paint();
+  for(const b of BENCH){
+    let first=0, chunks=0, acc=""; const t0=performance.now();
+    try{
+      const t=await LocalEngine.infer(b.msgs, { stream:true, maxTokens:b.max, onTok:a=>{ if(!first) first=performance.now()-t0; chunks++; acc=a; } });
+      const txt=String(t||acc||"");
+      if(b.id==="speed"){
+        const wall=(performance.now()-t0)/1000;
+        res.tFirst=Math.round(first||wall*1000);
+        res.tokPerSec=Math.round(chunks/wall*10)/10;
+        res.checks.speed={pass:true, detail:res.tokPerSec+" tok/s, first token in "+res.tFirst+" ms"};
+      } else {
+        const pass=!!b.check(txt);
+        res.checks[b.id]={pass, detail: pass ? "pass" : "said: "+txt.trim().slice(0,60)};
+      }
+    }catch(e){ res.checks[b.id]={pass:false, detail:"error: "+humanError(e, "the check itself errored")}; }
+    done++; paint();
+  }
+  const s=S(); s.settings.bench=Object.assign({}, s.settings.bench, {[model]:res}); await Store.save();
+  await audit("engine", "Benchmarked "+model.split("/").pop()+" on "+device+": "+(res.tokPerSec||"?")+" tok/s, "+BENCH.filter(b=>b.check).map(b=>((res.checks[b.id]&&res.checks[b.id].pass)?"✓":"✕")+b.id).join(" "));
+  btn.disabled=false; renderEngineBench();
+}
+function renderEngineBench(){
+  const out=$("#enginebenchout"); if(!out) return;
+  const b=((S()&&S().settings.bench)||{})[LocalEngine.loadedModel];
+  if(!b){ out.innerHTML=""; return; }
+  const rows=BENCH.map(x=>{ const c=b.checks[x.id]; if(!c) return "";
+    return '<div class="small" style="font-size:12px;color:var(--dim)">'+(c.pass?"✓ ":"✕ ")+esc(x.label)+(c.detail?' <span style="color:var(--dim2)">- '+esc(c.detail)+"</span>":"")+"</div>"; }).join("");
+  out.innerHTML='<div class="small" style="font-size:12px;color:var(--dim);margin-top:6px">Benchmark on this device ('+esc(b.device+(b.dtype?", "+b.dtype:""))+", "+new Date(b.ts).toLocaleDateString()+"):</div>"+rows
+    +'<div class="small" style="font-size:11.5px;color:var(--dim2);margin-top:4px">These numbers are this device\'s own - WASM vs WebGPU differ by a lot. Load another model and re-run to compare them head to head.</div>';
+}
+$("#enginebench").addEventListener("click", benchRun);
+
+/* ---------------- voice input ----------------
+   Dictation via the browser's own speech service (Web Speech API). Honest
+   by construction: the button exists only where the API does, the copy says
+   transcription leaves the page for the browser's speech service, and every
+   state - listening, denied, unsupported - says what is actually true. */
+const Voice = (()=>{
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec=null, listening=false, base="";
+  function supported(){ return !!SR; }
+  function stop(){ if(rec && listening){ try{ rec.stop(); }catch(e){} } }
+  function paint(){
+    const b=$("#micbtn"); if(!b) return;
+    b.classList.toggle("listening", listening);
+    b.title = listening ? "Listening - tap to stop" : "Dictate - transcription uses this browser's speech service";
+  }
+  function toggle(){
+    if(!SR) return;
+    if(listening){ stop(); return; }
+    const inp=$("#chatinput");
+    rec = new SR();
+    rec.continuous = true; rec.interimResults = true;
+    rec.lang = (navigator.language||"en-US");
+    base = inp.value ? inp.value.replace(/\s+$/,"")+" " : "";
+    rec.onresult = (e)=>{
+      let final="", interim="";
+      for(const r of e.results){ (r.isFinal ? final+=r[0].transcript : interim+=r[0].transcript); }
+      inp.value = base + final + interim;
+      inp.dispatchEvent(new Event("input"));
+      inp.focus();
+    };
+    rec.onerror = (e)=>{
+      listening=false; paint();
+      const why = e && e.error;
+      if(why==="not-allowed"||why==="service-not-allowed") toast("Microphone access was denied - allow it in the browser's site settings to dictate.");
+      else if(why==="network") toast("Dictation needs a connection - this browser transcribes speech on its own service, not on your device.");
+      else if(why!=="aborted") toast("Dictation stopped: "+humanError(why, "the speech service hit a snag")+".");
+    };
+    rec.onend = ()=>{ listening=false; paint(); };
+    try{ rec.start(); listening=true; paint(); audit("voice","Dictation started (browser speech service)"); }
+    catch(e){ toast("Dictation could not start: "+humanError(e, "the speech service is unavailable")+"."); }
+  }
+  return { supported, toggle, stop, get listening(){ return listening; } };
+})();
+$("#micbtn").addEventListener("click", ()=>Voice.toggle());
+
+/* ---------------- prompt library ----------------
+   Prompts the user reaches for often, one tap into the composer. Plain local
+   data like everything else; included in backups automatically. */
+function renderPrompts(){
+  const el=$("#promptlist"); if(!el) return;
+  const list=S().prompts||[];
+  el.innerHTML = list.length ? list.map(p=>
+    `<div class="mtrow" style="align-items:flex-start"><span class="mtid" style="white-space:normal"><b>${esc(p.title)}</b><br><span style="color:var(--dim2);font-size:12px">${esc(p.text.slice(0,90))}${p.text.length>90?"...":""}</span></span><span class="mtuse" style="white-space:nowrap"><button class="btn" data-useprompt="${p.id}">Use</button> <button class="btn" data-delprompt="${p.id}" title="Delete">×</button></span></div>`
+  ).join("") : `<div class="small" style="color:var(--dim2);font-size:12px">No saved prompts yet.</div>`;
+  el.querySelectorAll("[data-useprompt]").forEach(b=>b.onclick=()=>{
+    const p=(S().prompts||[]).find(x=>x.id===b.dataset.useprompt); if(!p) return;
+    switchView("chat");
+    const inp=$("#chatinput"); inp.value=p.text; inp.focus(); inp.dispatchEvent(new Event("input"));
+  });
+  el.querySelectorAll("[data-delprompt]").forEach(b=>b.onclick=async ()=>{
+    S().prompts=(S().prompts||[]).filter(x=>x.id!==b.dataset.delprompt);
+    await Store.save(); renderPrompts(); toast("Prompt deleted.");
+  });
+}
+async function addPrompt(title, text){
+  title=String(title||"").trim().slice(0,60); text=String(text||"").trim().slice(0,4000);
+  if(!text){ toast("Nothing to save - write or compose a prompt first."); return false; }
+  if(!title) title=text.split(/\n/)[0].slice(0,48);
+  if(!Array.isArray(S().prompts)) S().prompts=[];
+  S().prompts.unshift({id:uid("pr"), title, text, created:nowISO()});
+  await Store.save(); renderPrompts(); toast("Prompt saved.");
+  return true;
+}
+$("#promptadd").addEventListener("click", async ()=>{
+  if(await addPrompt($("#prompttitle").value, $("#prompttext").value)){ $("#prompttitle").value=""; $("#prompttext").value=""; }
+});
+$("#promptsave").addEventListener("click", async ()=>{
+  const t=($("#chatinput")||{}).value||"";
+  if(await addPrompt($("#prompttitle").value, t)){ $("#prompttitle").value=""; }
+});
+$("#prompttext").addEventListener("keydown", e=>{ if(e.key==="Enter"&&(e.metaKey||e.ctrlKey)){ e.preventDefault(); $("#promptadd").click(); } });
+
+/* ---------------- backup: everything you own, one file ----------------
+   Local-first only works if the data is portable. Export snapshots the whole
+   store minus secrets (API keys, MCP keys, cloak originals - those never
+   leave the device, so the file is safe to keep anywhere). Import shows
+   exactly what it will restore, then replaces on explicit confirm. */
+function backupSnapshot(){
+  const data = JSON.parse(JSON.stringify(S()));
+  data.settings.keyStored = "";
+  data.settings.searchKey = "";
+  data.settings.monidKey = "";
+  (data.mcps||[]).forEach(m=>{ m.key=""; });
+  data.cloak = { on: !!(data.cloak&&data.cloak.on), rules: [] };   // originals stay on this device
+  return { app:"open-muse", format:1, exportedAt:nowISO(), data };
+}
+function backupCounts(d){
+  const c=[];
+  const n=(x,w)=>{ if(x) c.push(x+" "+w+(x===1?"":"s")); };
+  n((d.convos||[]).length+(d.chat&&d.chat.length?1:0)||0, "chat");
+  n((d.goals||[]).length, "goal");
+  n((d.habits||[]).length, "habit");
+  n((d.memory||[]).length, "memory note");
+  n((d.agents||[]).length, "agent");
+  n((d.automations||[]).length, "automation");
+  n((d.customTools||[]).length, "custom tool");
+  n((d.miniapps||[]).length, "studio app");
+  n((d.mcps||[]).length, "MCP server");
+  n((d.tasks||[]).length, "task");
+  n((d.prompts||[]).length, "saved prompt");
+  return c.length ? c.join(", ") : "settings only";
+}
+$("#backupexport").addEventListener("click", async ()=>{
+  const snap = backupSnapshot();
+  const blob = new Blob([JSON.stringify(snap, null, 1)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "open-muse-backup-"+snap.exportedAt.slice(0,10)+".json";
+  a.click(); setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+  await audit("backup", "Exported backup ("+backupCounts(snap.data)+")");
+  const out=$("#backupout"); if(out) out.innerHTML='<div class="small" style="font-size:12px;color:var(--dim)">Exported: '+esc(backupCounts(snap.data))+'. Keys and cloak originals stayed on this device.</div>';
+});
+$("#backupimport").addEventListener("click", ()=> $("#backupfile").click());
+$("#backupfile").addEventListener("change", async (e)=>{
+  const f = e.target.files && e.target.files[0]; e.target.value="";
+  const out=$("#backupout");
+  if(!f) return;
+  let snap=null;
+  try{ snap = JSON.parse(await f.text()); }catch(_){}
+  if(!snap || snap.app!=="open-muse" || !snap.data || typeof snap.data!=="object"){
+    out.innerHTML='<div class="small" style="font-size:12px;color:#a33">That file is not an Open Muse backup - nothing was changed.</div>'; return;
+  }
+  out.innerHTML='<div class="small" style="font-size:12px;color:var(--dim)">This backup ('+esc((snap.exportedAt||"").slice(0,10)||"unknown date")+') restores: <b>'+esc(backupCounts(snap.data))+'</b>. Importing replaces everything currently here.</div>'
+    +'<div style="display:flex;gap:8px;margin-top:8px"><button class="btn pri" id="backupgo">Replace everything</button><button class="btn" id="backupcancel">Cancel</button></div>';
+  $("#backupcancel").onclick=()=>{ out.innerHTML='<div class="small" style="font-size:12px;color:var(--dim)">Import cancelled - nothing was changed.</div>'; };
+  $("#backupgo").onclick=async ()=>{
+    const fresh = Object.assign(Store.default(), snap.data);
+    fresh.settings = Object.assign(Store.default().settings, snap.data.settings||{}, { keyStored:"", searchKey:"", monidKey:"" });
+    if(!Array.isArray(fresh.convos)) fresh.convos=[];
+    Store.raw = fresh;
+    await Store.save();
+    await audit("backup", "Imported backup from "+((snap.exportedAt||"").slice(0,10)||"unknown date")+" ("+backupCounts(snap.data)+")");
+    renderAll();
+    out.innerHTML='<div class="small" style="font-size:12px;color:var(--dim)">Backup restored: '+esc(backupCounts(snap.data))+'. Add your keys again in Settings - they are never part of a backup.</div>';
+    toast("Backup restored.");
+  };
+});
 $("#engineload").addEventListener("click", async ()=>{
   const custom=(($("#enginecustom")||{}).value||"").trim();
   const model= custom && /^[\w.-]+\/[\w.-]+$/.test(custom) ? custom : ((S().settings.model&&ENGINE_MODELS.some(m=>m.id===S().settings.model))?S().settings.model:ENGINE_MODELS[0].id);
@@ -2321,15 +2635,31 @@ const EVO_SECRET_RES = [ /thk_live_[A-Za-z0-9]{6,}/, /sk-or-[A-Za-z0-9._-]{6,}/,
 async function runSelfTests(){
   const out = [];
   try{ const k="openmuse.selftest"; localStorage.setItem(k,"1"); const ok=localStorage.getItem(k)==="1"; localStorage.removeItem(k); out.push({name:"storage roundtrip",pass:ok}); }
-  catch(e){ out.push({name:"storage roundtrip",pass:false,note:String(e).slice(0,80)}); }
+  catch(e){ out.push({name:"storage roundtrip",pass:false,note:humanError(e)}); }
   try{
     const k=await crypto.subtle.generateKey({name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
     const iv=crypto.getRandomValues(new Uint8Array(12));
     const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv},k,new TextEncoder().encode("muse"));
     const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv},k,ct);
     out.push({name:"AES-GCM roundtrip",pass:new TextDecoder().decode(pt)==="muse"});
-  }catch(e){ out.push({name:"AES-GCM roundtrip",pass:false,note:String(e).slice(0,80)}); }
-  out.push({name:"model key configured",pass:!!getKey(),note:getKey()?"":"add a key in Settings to draft proposals"});
+  }catch(e){ out.push({name:"AES-GCM roundtrip",pass:false,note:humanError(e)}); }
+  out.push({name:"model key configured",pass:Broker.has("model"),note:Broker.has("model")?"":"add a key in Settings to draft proposals"});
+  // fleet surface standards: favicon, real title + meta description, decent
+  // 404 on Pages, no placeholder text, and proof stack traces stay off screen
+  try{
+    out.push({name:"favicon present",pass:!!document.querySelector('link[rel="icon"]')});
+    const t=document.title||"";
+    out.push({name:"real page title",pass:t.length>3 && !/untitled/i.test(t),note:t.slice(0,60)});
+    const md=document.querySelector('meta[name="description"]');
+    out.push({name:"meta description",pass:!!(md && (md.getAttribute("content")||"").length>40)});
+    out.push({name:"no placeholder text in the UI",pass:!/lorem ipsum|coming soon/i.test(document.body?document.body.innerText:"")});
+    const stacky=new Error("boom\n    at Object.x (app.js:1:1)\n    at y (worker.js:2:2)");
+    out.push({name:"errors never show stack traces",pass:!/ at \w+ \(|\.js:\d+/.test(humanError(stacky)),note:humanError(stacky).slice(0,60)});
+    if(/(^|\.)github\.io$|(^|\.)pages\.dev$/.test(location.hostname)){
+      const r=await fetch("./404.html",{cache:"no-store"});
+      out.push({name:"404 page served",pass:r.ok && /not here|not found/i.test(await r.text())});
+    } else out.push({name:"404 page (off Pages)",pass:true,note:"checked on the deployed site"});
+  }catch(e){ out.push({name:"surface standards",pass:false,note:humanError(e)}); }
   return out;
 }
 
@@ -2374,7 +2704,7 @@ async function evaluateEvolution(id){
 }
 
 async function draftEvolution(ask){
-  if(!getKey()){ toast("Add a model key in Settings first."); switchView("settings"); return; }
+  if(!Broker.has("model")){ toast("Add a model key in Settings first."); switchView("settings"); return; }
   const btn=$("#evodraft"); btn.disabled=true; btn.textContent="Drafting...";
   try{
     const engine = S().settings.provider==="tokenharbor" ? EVOLVE_ENGINE : activeModel();
@@ -2393,14 +2723,14 @@ Hard rules: original code only; patches small and self-contained; no external se
     await Store.save(); renderEvolutions();
     await evaluateEvolution(e.id);   // isolated attempt: draft -> gates immediately, failures logged
   }catch(e3){
-    toast("Draft failed: "+String(e3.message||e3).slice(0,90));
+    toast("Draft failed: "+humanError(e3, "the model could not draft that - try again"));
   }finally{ btn.disabled=false; btn.textContent="Draft proposal"; }
 }
 
 async function proposalFromChat(){
   const last = [...S().chat].reverse().find(m=>m.role==="muse" && /```/.test(m.text));
   if(!last){ toast("No code or diff in chat yet."); return; }
-  if(!getKey()){ toast("Add a model key in Settings first."); return; }
+  if(!Broker.has("model")){ toast("Add a model key in Settings first."); return; }
   toast("Structuring proposal...");
   try{
     const raw = await chatOnce([
@@ -2412,7 +2742,7 @@ async function proposalFromChat(){
     await audit("evolve", `Coder-mode diff became proposal: "${e.title}"`);
     await Store.save(); switchView("evolve");
     await evaluateEvolution(e.id);
-  }catch(e2){ toast("Could not structure that diff: "+String(e2.message||e2).slice(0,80)); }
+  }catch(e2){ toast("Could not structure that diff: "+humanError(e2, "the model returned an unreadable diff")); }
 }
 
 async function decideEvolution(id, ok){
@@ -2556,7 +2886,7 @@ $("#addmcpbtn").addEventListener("click", ()=>{
     closeModal();
     const srv={id:uid("mcp"), name:n.slice(0,40), url:u.slice(0,200), key:k.slice(0,200), tools:[]};
     S().mcps.push(srv); await Store.save(); renderMcps();
-    try{ await mcpDiscover(srv.id); toast(`Connected - ${srv.tools.length} tools found.`); }catch(e){ toast("Added, but discovery failed: "+String(e).slice(0,60)); }
+    try{ await mcpDiscover(srv.id); toast(`Connected - ${srv.tools.length} tools found.`); }catch(e){ toast("Added, but discovery failed: "+humanError(e, "the server did not answer")); }
   };
 });
 $("#buildtoolbtn").addEventListener("click", ()=>{
@@ -2565,19 +2895,19 @@ $("#buildtoolbtn").addEventListener("click", ()=>{
     <div class="row"><button class="btn modal-cancel">Cancel</button><button class="btn pri" id="gobtool">Build it</button></div>`);
   $("#gobtool").onclick=async()=>{ const v=$("#btask").value.trim(); if(!v) return; closeModal();
     toast("Muse is building the tool...");
-    try{ await buildCustomTool(v); }catch(e){ toast("Build failed: "+String(e.message||e).slice(0,70)); }
+    try{ await buildCustomTool(v); }catch(e){ toast("Build failed: "+humanError(e, "the model could not build that tool")); }
   };
 });
 
 /* studio wiring */
 $("#newappbtn").addEventListener("click", ()=>{
-  if(!getKey()){ toast("Add a model key in Settings first."); return; }
+  if(!Broker.has("model")){ toast("Add a model key in Settings first."); return; }
   openModal(`<h3>New mini-app</h3><div class="sub">Describe it in a line. Muse writes a single-file app - self-contained, secret-scanned, no external calls - and keeps it in your VM.</div>
     <div class="field"><input id="nappdesc" placeholder="e.g. a pomodoro timer with session stats" maxlength="200"></div>
     <div class="row"><button class="btn modal-cancel">Cancel</button><button class="btn pri" id="gonapp">Build it</button></div>`);
   $("#gonapp").onclick=async()=>{ const v=$("#nappdesc").value.trim(); if(!v) return; closeModal();
     toast("Muse is building the app...");
-    try{ const name=await genMiniApp(v); toast(`Built "${name}".`); }catch(e){ toast("Build failed: "+String(e.message||e).slice(0,70)); }
+    try{ const name=await genMiniApp(v); toast(`Built "${name}".`); }catch(e){ toast("Build failed: "+humanError(e, "the model could not build that app")); }
   };
 });
 
@@ -2598,7 +2928,7 @@ function runSandboxed(code, prelude){
     try{
       const wrapped = `${prelude||""}
 const __logs=[]; const console={log:(...a)=>__logs.push(a.map(x=>{try{return typeof x==="object"?JSON.stringify(x):String(x)}catch(e){return String(x)}}).join(" "))};
-Promise.resolve((async()=>{ ${code} })()).then(r=>postMessage({logs:__logs,result:(()=>{try{return typeof r==="object"?JSON.stringify(r):String(r)}catch(e){return String(r)}})()})).catch(e=>postMessage({logs:__logs,error:String(e)}));`;
+Promise.resolve((async()=>{ ${code} })()).then(r=>postMessage({logs:__logs,result:(()=>{try{return typeof r==="object"?JSON.stringify(r):String(r)}catch(e){return String(r)}})()})).catch(e=>postMessage({logs:__logs,error:String(e&&e.message||e).split("\n")[0].slice(0,200)}));`;
       worker = new Worker(URL.createObjectURL(new Blob([wrapped],{type:"application/javascript"})));
     }catch(e){ resolve("sandbox unavailable: "+String(e).slice(0,80)); return; }
     const to = setTimeout(()=>{ worker.terminate(); resolve("(killed: 5 second limit)"); }, 5000);
@@ -2606,7 +2936,7 @@ Promise.resolve((async()=>{ ${code} })()).then(r=>postMessage({logs:__logs,resul
       const d = e.data||{};
       resolve((d.logs&&d.logs.length ? d.logs.join("\n")+"\n" : "") + (d.error ? "Error: "+String(d.error).slice(0,200) : "→ "+String(d.result).slice(0,1500)));
     };
-    worker.onerror = e=>{ clearTimeout(to); worker.terminate(); resolve("Error: "+String(e.message||"script error").slice(0,200)); };
+    worker.onerror = e=>{ clearTimeout(to); worker.terminate(); resolve("Error: "+humanError(e.message||"script error", "the script crashed")); };
   });
 }
 function calcEval(expr){
@@ -2624,21 +2954,21 @@ function calcEval(expr){
   return String(Math.round(v*1e10)/1e10);
 }
 async function webSearch(q){
-  const pv = S().settings.searchProvider || "tinyfish", key = S().settings.searchKey;
-  if(!key) throw new Error("needs a search API key - add one in Tools (TinyFish's key is free, no card)");
+  const pv = S().settings.searchProvider || "tinyfish";
+  if(!Broker.has("search")) throw new Error("needs a search API key - add one in Tools (TinyFish's key is free, no card)");
   if(pv==="tinyfish"){
-    const r = await fetch("https://api.search.tinyfish.ai?query="+encodeURIComponent(q)+"&language=en", {headers:{"X-API-Key":key}});
+    const r = await Broker.use("search", "https://api.search.tinyfish.ai?query="+encodeURIComponent(q)+"&language=en");
     if(!r.ok) throw new Error("tinyfish "+r.status);
     const j = await r.json();
     return (j.results||[]).slice(0,6).map(x=>`- ${x.title||x.url}: ${x.url}\n  ${String(x.snippet||x.content||x.description||"").slice(0,180)}`).join("\n") || "(no results)";
   }
   if(pv==="tavily"){
-    const r = await fetch("https://api.tavily.com/search",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({api_key:key, query:q, max_results:5})});
+    const r = await Broker.use("search", "https://api.tavily.com/search", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({query:q, max_results:5})}, {bodyKey:"api_key"});
     if(!r.ok) throw new Error("tavily "+r.status);
     const j = await r.json();
     return (j.results||[]).map(x=>`- ${x.title}: ${x.url}\n  ${String(x.content||"").slice(0,180)}`).join("\n") || "(no results)";
   }
-  const r = await fetch("https://api.search.brave.com/res/v1/web/search?q="+encodeURIComponent(q)+"&count=5",{headers:{"X-Subscription-Token":key,"Accept":"application/json"}});
+  const r = await Broker.use("search", "https://api.search.brave.com/res/v1/web/search?q="+encodeURIComponent(q)+"&count=5", {headers:{"Accept":"application/json"}});
   if(!r.ok) throw new Error("brave "+r.status);
   const j = await r.json();
   return (j.web&&j.web.results||[]).map(x=>`- ${x.title}: ${x.url}\n  ${String(x.description||"").slice(0,180)}`).join("\n") || "(no results)";
@@ -2649,13 +2979,12 @@ async function webSearch(q){
    from the browser. Auth is the user's own Bearer key; runs spend their
    Monid balance, so results report cost and the tool descriptions say so. */
 async function monidApi(method, path, body){
-  const key = S().settings.monidKey;
-  if(!key) throw new Error("needs a Monid key - add one in Tools (app.monid.ai/access/api-keys)");
+  if(!Broker.has("monid")) throw new Error("needs a Monid key - add one in Tools (app.monid.ai/access/api-keys)");
   let r;
   try{
-    r = await fetch("https://api.monid.ai"+path, {
+    r = await Broker.use("monid", "https://api.monid.ai"+path, {
       method,
-      headers:{"Authorization":"Bearer "+key, "Content-Type":"application/json", "X-Monid-Client":"open-muse"},
+      headers:{"Content-Type":"application/json", "X-Monid-Client":"open-muse"},
       body: body ? JSON.stringify(body) : undefined
     });
   }catch(e){ const err = new Error("network"); err.corsBlocked = true; throw err; }
@@ -2666,7 +2995,7 @@ async function monidApi(method, path, body){
 function monidCorsNote(e){
   return e && e.corsBlocked
     ? "Monid's API only answers browser calls from its own domains (app.monid.ai) - a static page on any other origin is CORS-blocked, and no app code can change that. The Monid CLI (npm i -g @monid-ai/cli) works outside the browser."
-    : "Error: "+String(e && e.message || e).slice(0,200);
+    : "Error: "+humanError(e, "that tool failed");
 }
 
 const Tools = {
@@ -2737,8 +3066,8 @@ const Tools = {
                    return "reminder set for "+at.toLocaleString()+" (fires in-tab; late catch-up if asleep)"; } },
   fetch_page:  { name:"Fetch page", argsHint:'{"url":"https://..."}', badge:"key/open-net", desc:"Reads a page as clean text. Uses TinyFish Fetch when its key is set (renders the page for you); otherwise a direct fetch in open-network mode (many sites block those - reported, not hidden).",
                  run: async a=>{ const u=String(a.url||"").slice(0,300); if(!/^https?:\/\//.test(u)) throw new Error("http(s) URLs only");
-                   if(S().settings.searchProvider==="tinyfish" && S().settings.searchKey){
-                     const r=await fetch("https://api.fetch.tinyfish.ai",{method:"POST",headers:{"X-API-Key":S().settings.searchKey,"Content-Type":"application/json"},body:JSON.stringify({urls:[u],format:"markdown"})});
+                   if(S().settings.searchProvider==="tinyfish" && Broker.has("search")){
+                     const r=await Broker.use("search", "https://api.fetch.tinyfish.ai", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({urls:[u],format:"markdown"})});
                      if(!r.ok) throw new Error("tinyfish "+r.status);
                      const j=await r.json();
                      const txt=(j.results||[]).map(x=>x.text||"").join("\n");
@@ -2960,20 +3289,26 @@ const CSP_META = ()=> document.querySelector('meta[http-equiv="Content-Security-
    providers, the search providers, Hugging Face (built-in engine weights),
    and local endpoints. Open network mode (MCP, fetch_page) is the documented
    escape hatch and swaps in the wide policy until turned off. */
-const CSP_TIGHT = "default-src 'none'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; frame-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https://generativelanguage.googleapis.com https://openrouter.ai https://tokenharbor.ai https://api.tavily.com https://api.search.brave.com https://api.monid.ai https://api.search.tinyfish.ai https://api.fetch.tinyfish.ai https://huggingface.co https://*.cdn.hf.co https://cdn-lfs.huggingface.co https://*.xethub.hf.co http://localhost:* http://127.0.0.1:*; img-src 'self' data:; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
-const CSP_OPEN = CSP_TIGHT.replace(/connect-src [^;]+/, "connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:*");
 function applyNetPolicy(){
-  // The shipped CSP already permits tool fetches (connect-src https:); keys are only ever
-  // attached to the configured model provider by our own code, and sandboxed frames/workers
-  // get connect-src 'none'. This toggle is the consent gate for MCP + arbitrary fetch_page.
+  // The shipped meta tag in index.html is the single source of the tight policy;
+  // open-network mode derives from it by widening only connect-src. Nothing else
+  // is ever re-typed, so a directive (like manifest-src) cannot drift between copies.
+  // The toggle is the consent gate for MCP + arbitrary fetch_page; keys are only ever
+  // attached to the configured provider's own origin, by the broker.
   const on = !!(S() && S().settings.openNetwork);
-  const meta = CSP_META(); if(meta) meta.setAttribute("content", on ? CSP_OPEN : CSP_TIGHT);
+  const meta = CSP_META();
+  if(meta){
+    if(!applyNetPolicy._tight) applyNetPolicy._tight = meta.getAttribute("content");
+    meta.setAttribute("content", on
+      ? applyNetPolicy._tight.replace(/connect-src [^;]+/, "connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:*")
+      : applyNetPolicy._tight);
+  }
   const st=$("#opennetstate"); if(st){ st.textContent = on?"ON - MCP and page fetch enabled":"off"; st.className = "pill "+(on?"warn":""); }
   const cb=$("#opennet"); if(cb) cb.checked = on;
 }
 async function mcpRpc(srv, method, params){
-  const r = await fetch(srv.url, { method:"POST",
-    headers: Object.assign({"Content-Type":"application/json","Accept":"application/json, text/event-stream"}, srv.key?{Authorization:"Bearer "+srv.key}:{}) ,
+  const r = await Broker.useMcp(srv, srv.url, { method:"POST",
+    headers: {"Content-Type":"application/json","Accept":"application/json, text/event-stream"},
     body: JSON.stringify({jsonrpc:"2.0", id:uid("m"), method, params}) });
   if(!r.ok) throw new Error("http "+r.status);
   const ct = r.headers.get("content-type")||"";
@@ -3007,6 +3342,7 @@ function renderMcps(){
 
 /* ---------------- tools view ---------------- */
 function renderTools(){
+  renderPrompts();
   const box=$("#toolgrid"); if(!box||!S()) return;
   const customs = S().customTools.filter(t=>t.status==="active");
   const pending = S().customTools.filter(t=>t.status==="pending");
@@ -3029,7 +3365,7 @@ function renderTools(){
 
 /* ---------------- self-built tools (Muse extends itself) ---------------- */
 async function buildCustomTool(ask){
-  if(!getKey()){ toast("Add a model key in Settings first."); return; }
+  if(!Broker.has("model")){ toast("Add a model key in Settings first."); return; }
   const engine = S().settings.provider==="tokenharbor" ? EVOLVE_ENGINE : activeModel();
   const raw = await chatOnce([
     {role:"system",content:`Design a small browser tool as strict JSON: {"name":"snake_case_id","desc":"one line","argsHint":"{\\"x\\":\\"...\\"}","code":"async JS body; 'args' is in scope; use console.log for output; return the result","sampleArgs":{"x":"..."}}.
@@ -3467,8 +3803,8 @@ async function checkAutomations(){
 async function runAutomation(a, late){
   if(TEAM.active){ await audit("automation",`Deferred "${a.text}" - a team/workforce owns the compute right now`); return; }
   await audit("automation",`Fired: "${a.text}" (${a.cadence})${late?" - late catch-up":""}`);
-  if(!getKey() || S().settings.autonomy===false){
-    await addMsg("sys", `⏱ Automation due: "${esc(a.text)}" - ${!getKey()?"no model key is set":"autonomy is off"}, so it is parked here instead of running blind. Fix the gate and it fires on its own next cycle.`);
+  if(!Broker.has("model") || S().settings.autonomy===false){
+    await addMsg("sys", `⏱ Automation due: "${esc(a.text)}" - ${!Broker.has("model")?"no model key is set":"autonomy is off"}, so it is parked here instead of running blind. Fix the gate and it fires on its own next cycle.`);
     await Store.save(); renderChat(); return;
   }
   await addMsg("sys", `⏱ Automation firing${late?" (late catch-up - Muse was asleep at the scheduled time; nothing ran while the tab was closed)":""}: "${esc(a.text)}"`);
@@ -3721,7 +4057,7 @@ function renderAppField(){
 async function finishBoot(){
   armIdleLock();
   // first run on a fresh store: one welcome that says what this is and how to start
-  if(!S().chat.length && !getKey() && !S().settings.keyStored){
+  if(!S().chat.length && !Broker.has("model")){
     await addMsg("muse", "Welcome to Open Muse - a personal agent that belongs to you. Everything it learns lives in this browser (encrypt it in Settings), and nothing runs anywhere but this tab.\n\nGive it a brain and it starts working: paste a **Gemini** key (free at aistudio.google.com/apikey - the most reliable free tier), pick **Local** with Ollama on this machine, or **EDGE//AI** on-device.");
     await addMsg("muse", `<div class="wactions"><button class="wchip" data-wa="settings">Set up a key</button><button class="wchip" data-wa="goal">Try: plan a weekend trip</button><button class="wchip" data-wa="recall">What do you remember?</button></div>`, "card");
     await Store.save();
@@ -3737,6 +4073,7 @@ async function finishBoot(){
   ensureConvos();
   renderAll();
   applyModeUI();
+  if(Voice.supported()) $("#micbtn").hidden=false;
   applyNetPolicy();
   applyAppearance();
   Compat.render();

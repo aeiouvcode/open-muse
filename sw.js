@@ -4,7 +4,7 @@
    here: anything cross-origin passes straight through untouched, and the
    engine keeps its own weights cache. VERSION travels with the app cache-bust
    (index.html ?v=) - bump both together on every deploy. */
-const VERSION = "202609250100";
+const VERSION = "202609252115";
 const CACHE = "openmuse-shell-" + VERSION;
 const SHELL = [
   "./",
