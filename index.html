@@ -15,7 +15,7 @@
 <meta name="apple-mobile-web-app-title" content="Open Muse">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<link rel="stylesheet" href="styles.css?v=202609260600">
+<link rel="stylesheet" href="styles.css?v=202609261200">
 </head>
 <body>
 <button id="menubtn" title="Menu">☰</button>
@@ -293,7 +293,7 @@
             <input type="file" id="backupfile" accept="application/json,.json" style="display:none">
           </div>
           <div id="backupout" style="margin-top:6px"></div>
-          <div class="small" style="font-size:11.5px;color:var(--dim2);margin-top:6px">One JSON file with everything: chats, goals, habits, memory, workforce, automations, tools, studio apps, audit. Keys never leave the device - API keys, MCP keys and privacy-cloak originals are NOT in the file, so it is safe to store anywhere. Importing replaces the current data after showing exactly what it will restore.</div></div>
+          <div class="small" style="font-size:11.5px;color:var(--dim2);margin-top:6px">One JSON file with everything: chats, goals, habits, memory, workforce, automations, tools, studio apps, audit. Keys never leave the device - API keys, MCP keys and privacy-cloak originals are NOT in the file, so it is safe to store anywhere. Importing can merge into what is here (newer copy wins on conflicts) or replace everything - either way it shows exactly what the file holds first.</div></div>
         <div class="field"><label style="display:flex;gap:9px;align-items:center;font-size:13px"><input type="checkbox" id="cloakon" style="width:auto"><span>Privacy cloak - swap private data for synthetic twins before anything leaves this browser</span></label>
           <div class="small" style="font-size:12px;color:var(--dim);margin-top:6px">When on, every outbound model call - chat, goals, teams, automations, everything - is scrubbed first: emails, phone numbers and card/ID numbers are detected automatically, and anything you teach below is cloaked too. Each real value gets one consistent synthetic twin, so the model still reasons over coherent text. Replies are un-swapped before you see them, so you always read your real data. Twins live only in this browser's store - encrypted when a passphrase is set - and audit logs record counts, never values.</div>
           <div id="cloakrules" style="margin-top:8px"></div>
@@ -367,7 +367,7 @@
   <button class="btn" id="updatelater">Later</button>
 </div>
 <div class="toast" id="toast"></div>
-<script src="app.js?v=202609260600"></script>
+<script src="app.js?v=202609261200"></script>
 </body>
 </html>
 

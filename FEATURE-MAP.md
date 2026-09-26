@@ -11,6 +11,14 @@ Workforce, Memory, Tools & skills, Studio, Permissions, Audit trail, Evolve,
 Settings. Below: Chats (session drawer) + "+ New". Top-right of chat: status
 rail (provider/model/key presence) - tap opens Settings.
 
+## Settings (#view-settings)
+- Backup: Export downloads one JSON of everything (keys and cloak originals
+  never included). Import shows exactly what the file holds, then offers a
+  real choice: Merge (default) adds what is missing and keeps the newer copy
+  on same-id conflicts - memory notes dedupe by text, drafts never clobber,
+  settings and keys stay as they are; Replace wipes first, as before. Both
+  paths report exactly what happened and write to the audit trail.
+
 ## Chat (default view, #view-chat)
 - Send message: type in #chatinput, press Send (#sendbtn) or Enter. Streams a
   reply token-by-token. Stop button halts mid-stream; partial text is kept.

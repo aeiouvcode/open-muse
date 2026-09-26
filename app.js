@@ -276,7 +276,7 @@ function renderMemory(){
   bindMemlist();
 }
 function memItemHtml(m){
-  return `<div class="memitem"><div class="txt">${m.pinned?`<span class="memchip pinned">pinned</span>`:""}<span class="memchip">${m.kind||"fact"}</span>${esc(m.text)}<div class="when">${vmPath(m)} · learned ${m.ts.slice(0,10)} · ${esc(m.source||"conversation")}${m.uses?" · used "+m.uses+"x":""}${m.updated?" · revised "+m.updated+"x":""}${m.expiresAt?(memAlive(m)?" · expires "+m.expiresAt.slice(0,10):" · expired - removed on next load"):""}${m.pinned?" · rides every prompt":""}</div></div>
+  return `<div class="memitem"><div class="txt">${m.pinned?`<span class="memchip pinned">pinned</span>`:""}<span class="memchip">${m.kind||"fact"}</span>${esc(m.text)}<div class="when">${vmPath(m)} · learned ${(m.ts||"").slice(0,10)||"before records"} · ${esc(m.source||"conversation")}${m.uses?" · used "+m.uses+"x":""}${m.updated?" · revised "+m.updated+"x":""}${m.expiresAt?(memAlive(m)?" · expires "+m.expiresAt.slice(0,10):" · expired - removed on next load"):""}${m.pinned?" · rides every prompt":""}</div></div>
      <button class="iconbtn${m.pinned?" on":""}" data-pinmem="${m.id}" title="${m.pinned?"Unpin - stop injecting into every prompt":"Pin - always inject into every prompt"}">⚲</button>
      <button class="iconbtn" data-editmem="${m.id}" title="Edit this memory">\u270e</button>
      <button class="iconbtn" data-forget="${m.id}" title="Forget this">✕</button></div>`;
@@ -2309,6 +2309,51 @@ $("#backupexport").addEventListener("click", async ()=>{
   await audit("backup", "Exported backup ("+backupCounts(snap.data)+")");
   const out=$("#backupout"); if(out) out.innerHTML='<div class="small" style="font-size:12px;color:var(--dim)">Exported: '+esc(backupCounts(snap.data))+'. Keys and cloak originals stayed on this device.</div>';
 });
+/* Merge import: a backup should add to a life, never gamble it. Each
+   collection dedupes by id (memory notes by text); on a same-id conflict the
+   copy with the newer updated/created stamp wins. Settings, keys, and cloak
+   originals always stay as they are on this device. */
+function mergeBackup(data){
+  const s=S();
+  parkActiveConvo();
+  const report={added:{},conflicts:0};
+  const keyOf=(k,x)=> k==="memory" ? (x.text||x.id) : x.id;
+  ["convos","goals","habits","memory","agents","automations","customTools","miniapps","mcps","tasks","prompts"].forEach(k=>{
+    const inc=Array.isArray(data[k])?data[k]:[];
+    if(!inc.length) return;
+    s[k]=Array.isArray(s[k])?s[k]:[];
+    const seen=new Map(s[k].map(x=>[keyOf(k,x),x]));
+    let added=0;
+    for(const item of inc){
+      const kk=keyOf(k,item); if(kk==null) continue;
+      const ex=seen.get(kk);
+      if(!ex){ if(k==="memory" && !item.ts) item.ts=new Date().toISOString(); s[k].push(item); seen.set(kk,item); added++; }
+      else{
+        report.conflicts++;
+        if(String(item.updated||item.created||"")>String(ex.updated||ex.created||"")){
+          s[k][s[k].indexOf(ex)]=item; seen.set(kk,item);
+        }
+      }
+    }
+    if(added) report.added[k]=added;
+  });
+  if(data.drafts && typeof data.drafts==="object"){
+    s.drafts=s.drafts||{};
+    let added=0;
+    for(const [cid,txt] of Object.entries(data.drafts)){ if(!s.drafts[cid] && txt){ s.drafts[cid]=txt; added++; } }
+    if(added) report.added.drafts=added;
+  }
+  const c=s.convos.find(x=>x.id===s.activeConvo);
+  if(c){ s.chat=c.chat||[]; c.chat=[]; }
+  else if(s.convos[0]){ s.activeConvo=s.convos[0].id; s.chat=s.convos[0].chat||[]; s.convos[0].chat=[]; }
+  return report;
+}
+function mergeReportLine(rep){
+  const parts=Object.entries(rep.added).map(([k,n])=>"+"+n+" "+k);
+  let line = parts.length ? "Merged: "+parts.join(", ") : "Merged: everything in that backup was already here";
+  if(rep.conflicts) line += " ("+rep.conflicts+" conflict"+(rep.conflicts===1?"":"s")+" kept the newer copy)";
+  return line + ". Settings and keys untouched.";
+}
 $("#backupimport").addEventListener("click", ()=> $("#backupfile").click());
 $("#backupfile").addEventListener("change", async (e)=>{
   const f = e.target.files && e.target.files[0]; e.target.value="";
@@ -2319,9 +2364,17 @@ $("#backupfile").addEventListener("change", async (e)=>{
   if(!snap || snap.app!=="open-muse" || !snap.data || typeof snap.data!=="object"){
     out.innerHTML='<div class="small" style="font-size:12px;color:#a33">That file is not an Open Muse backup - nothing was changed.</div>'; return;
   }
-  out.innerHTML='<div class="small" style="font-size:12px;color:var(--dim)">This backup ('+esc((snap.exportedAt||"").slice(0,10)||"unknown date")+') restores: <b>'+esc(backupCounts(snap.data))+'</b>. Importing replaces everything currently here.</div>'
-    +'<div style="display:flex;gap:8px;margin-top:8px"><button class="btn pri" id="backupgo">Replace everything</button><button class="btn" id="backupcancel">Cancel</button></div>';
+  out.innerHTML='<div class="small" style="font-size:12px;color:var(--dim)">This backup ('+esc((snap.exportedAt||"").slice(0,10)||"unknown date")+') holds: <b>'+esc(backupCounts(snap.data))+'</b>. Merge adds what is missing and keeps the newer copy on conflicts; Replace wipes what is here first. Keys and settings stay as they are either way.</div>'
+    +'<div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn pri" id="backupmerge">Merge into what\'s here</button><button class="btn" id="backupgo">Replace everything</button><button class="btn" id="backupcancel">Cancel</button></div>';
   $("#backupcancel").onclick=()=>{ out.innerHTML='<div class="small" style="font-size:12px;color:var(--dim)">Import cancelled - nothing was changed.</div>'; };
+  $("#backupmerge").onclick=async ()=>{
+    const rep=mergeBackup(snap.data);
+    await Store.save();
+    await audit("backup", "Merged backup from "+((snap.exportedAt||"").slice(0,10)||"unknown date")+" ("+mergeReportLine(rep)+")");
+    renderAll();
+    out.innerHTML='<div class="small" style="font-size:12px;color:var(--dim)">'+esc(mergeReportLine(rep))+'</div>';
+    toast("Backup merged.");
+  };
   $("#backupgo").onclick=async ()=>{
     const fresh = Object.assign(Store.default(), snap.data);
     fresh.settings = Object.assign(Store.default().settings, snap.data.settings||{}, { keyStored:"", searchKey:"", monidKey:"" });
