@@ -554,6 +554,7 @@ async function switchConvo(id){
   const t=s.convos.find(c=>c.id===id); if(!t) return;
   s.chat=t.chat||[]; t.chat=[]; s.activeConvo=id;
   chatSearchCur=-1;
+  restoreDraft();
   await Store.save(); renderChat(); renderConvos();
 }
 async function newConvo(){
@@ -561,6 +562,7 @@ async function newConvo(){
   const id="c"+Date.now().toString(36)+Math.floor(Math.random()*1e4).toString(36);
   s.convos.unshift({id, name:"New chat", _auto:true, created:new Date().toISOString(), updated:new Date().toISOString(), chat:[]});
   s.chat=[]; s.activeConvo=id;
+  restoreDraft();
   await addMsg("sys","New chat. Your other chats are kept in the list - nothing is lost.");
   await Store.save(); renderChat(); renderConvos();
   $("#chatinput").focus();
@@ -569,13 +571,19 @@ function renderConvos(){
   const el=$("#chatlist"); if(!el || !S()) return;
   ensureConvos();
   const s=S();
-  el.innerHTML = s.convos.map(c=>{
+  const ordered = s.convos.slice().sort((a,b)=>((b.pin?1:0)-(a.pin?1:0)));
+  el.innerHTML = ordered.map(c=>{
     const isA = c.id===s.activeConvo;
     const chat = isA ? s.chat : (c.chat||[]);
     const name = (c._auto ? (convoAutoName(chat)||c.name) : c.name) || "Chat";
     const n = chat.filter(m=>m.role==="user").length;
-    return `<div class="convo${isA?" on":""}"><button class="convo-name" data-cid="${c.id}" title="${esc(name)}">${esc(name)}</button><span class="convo-n">${n||""}</span><button class="convo-rn" data-cid="${c.id}" title="Rename">&#9998;</button><button class="convo-x" data-cid="${c.id}" title="Delete chat">&times;</button></div>`;
+    const hasDraft = !!(s.drafts && s.drafts[c.id]);
+    return `<div class="convo${isA?" on":""}"><button class="convo-name" data-cid="${c.id}" title="${esc(name)}">${esc(name)}${hasDraft?' <span class="convo-draft">draft</span>':""}</button><span class="convo-n">${n||""}</span><button class="convo-pin${c.pin?" on":""}" data-cid="${c.id}" title="${c.pin?"Unpin":"Pin to top"}">&#128204;</button><button class="convo-rn" data-cid="${c.id}" title="Rename">&#9998;</button><button class="convo-x" data-cid="${c.id}" title="Delete chat">&times;</button></div>`;
   }).join("");
+  $$("#chatlist .convo-pin").forEach(b=>b.onclick=async()=>{
+    const c=S().convos.find(x=>x.id===b.dataset.cid); if(!c) return;
+    c.pin=!c.pin; await Store.save(); renderConvos();
+  });
   $$("#chatlist .convo-name").forEach(b=>b.onclick=()=>switchConvo(b.dataset.cid));
   $$("#chatlist .convo-x").forEach(b=>b.onclick=async()=>{
     const s=S();
@@ -583,6 +591,7 @@ function renderConvos(){
     if(b.dataset.armed){ 
       const id=b.dataset.cid;
       s.convos = s.convos.filter(c=>c.id!==id);
+      if(s.drafts) delete s.drafts[id];
       if(s.activeConvo===id){ s.activeConvo=s.convos[0].id; s.chat=s.convos[0].chat||[]; s.convos[0].chat=[]; }
       await Store.save(); renderChat(); renderConvos(); toast("Chat deleted.");
     } else {
@@ -1631,7 +1640,7 @@ async function sendChat(auto){
   if(!S()){ showLockScreen("Locked - enter your passphrase to continue."); return; }
   const injected = auto && typeof auto.text==="string";
   const ta=$("#chatinput"); const text=(injected?auto.text:ta.value).trim().slice(0,4000); if(!text) return;
-  if(!injected){ ta.value=""; ta.style.height="auto"; }
+  if(!injected){ ta.value=""; ta.style.height="auto"; const s=S(); if(s&&s.drafts){ delete s.drafts[s.activeConvo]; } }
   await addMsg("user", text);
   if(pendingBranch){
     const nm = S().chat[S().chat.length-1];
@@ -2287,6 +2296,7 @@ function backupCounts(d){
   n((d.mcps||[]).length, "MCP server");
   n((d.tasks||[]).length, "task");
   n((d.prompts||[]).length, "saved prompt");
+  n(Object.keys(d.drafts||{}).length, "draft");
   return c.length ? c.join(", ") : "settings only";
 }
 $("#backupexport").addEventListener("click", async ()=>{
@@ -2482,7 +2492,24 @@ $("#exportcsv").onclick=async()=>{ downloadText("open-muse-goals.csv","text/csv"
 
 /* composer */
 const ta=$("#chatinput");
-ta.addEventListener("input",()=>{ ta.style.height="auto"; ta.style.height=Math.min(ta.scrollHeight,160)+"px"; });
+/* drafts: an unfinished message belongs to its chat, survives reloads and
+   tab kills, and is marked in the chat list - phone browsers murder tabs. */
+let draftT=null;
+function restoreDraft(){
+  const s=S(); if(!s) return;
+  ta.value = (s.drafts && s.drafts[s.activeConvo]) || "";
+  ta.style.height="auto"; ta.style.height=Math.min(ta.scrollHeight,160)+"px";
+}
+ta.addEventListener("input",()=>{
+  ta.style.height="auto"; ta.style.height=Math.min(ta.scrollHeight,160)+"px";
+  clearTimeout(draftT);
+  draftT=setTimeout(()=>{
+    const s=S(); if(!s) return;
+    s.drafts = s.drafts||{};
+    if(ta.value) s.drafts[s.activeConvo]=ta.value; else delete s.drafts[s.activeConvo];
+    Store.save(); renderConvos();
+  },600);
+});
 ta.addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); sendChat(); } });
 $("#sendbtn").addEventListener("click", sendChat);
 
@@ -4074,6 +4101,7 @@ async function finishBoot(){
   renderAll();
   applyModeUI();
   if(Voice.supported()) $("#micbtn").hidden=false;
+  restoreDraft();
   applyNetPolicy();
   applyAppearance();
   Compat.render();

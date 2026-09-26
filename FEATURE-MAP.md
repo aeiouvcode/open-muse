@@ -18,6 +18,12 @@ rail (provider/model/key presence) - tap opens Settings.
   variant is parked as a branch.
 - Branches: arrows on a user message cycle its variants (attempts); editing a
   sent message forks a new branch instead of rewriting history.
+- Pin a chat: pin icon on any chat row in the drawer - pinned chats stay on
+  top; the pin shows in accent while set. Rename and delete sit beside it.
+- Drafts: an unfinished message is autosaved to its chat (about a second
+  after you stop typing), survives reloads and killed tabs, and shows a
+  "draft" tag in the chat list. Sending consumes and clears it. Drafts ride
+  along in backups.
 - Search chats: #chatsearch box above the message list - matches message text
   across sessions, results jump to the session+message.
 - Voice input: mic button in the composer (only appears where the browser

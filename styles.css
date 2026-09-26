@@ -580,7 +580,10 @@ html[data-theme] select{padding-right:28px;background-image:linear-gradient(45de
 .convo.on .convo-name{color:var(--ink);font-weight:600}
 .convo-name:hover{color:var(--acc)}
 .convo-n{font-size:10px;color:var(--dim2);flex:none}
-.convo-rn,.convo-x{border:0;background:none;color:var(--dim2);font:inherit;font-size:12px;cursor:pointer;opacity:0;padding:2px 3px;flex:none}
+.convo-pin,.convo-rn,.convo-x{border:0;background:none;color:var(--dim2);font:inherit;font-size:11px;cursor:pointer;opacity:0;padding:2px 3px;flex:none}
+.convo:hover .convo-pin,.convo.on .convo-pin,.convo-pin.on{opacity:.75}
+.convo-pin.on{opacity:1;color:var(--acc)}
+.convo-draft{font-size:10px;color:var(--dim2);border:1px solid var(--line);border-radius:99px;padding:0 6px;margin-left:4px}
 .convo:hover .convo-rn,.convo:hover .convo-x,.convo.on .convo-rn,.convo.on .convo-x{opacity:.75}
 .convo-rn:hover,.convo-x:hover{opacity:1;color:var(--acc)}
 .convo-x.armed{opacity:1;color:#b3331e;font-size:10.5px}
