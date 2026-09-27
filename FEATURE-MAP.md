@@ -87,6 +87,11 @@ rail (provider/model/key presence) - tap opens Settings.
 
 ## Goals & plans (#view-goals)
 - New goal: "+ New goal" - Muse drafts a plan of steps; approve to activate.
+- Activity row (gen 32): each goal collapses to one compact line -
+  "Worked for Ns" summed from real per-step timestamps (agent-run steps
+  only; user/rejected steps add nothing, never a fake duration) plus step
+  count. Click to expand the full step list. Expanded state is
+  session-only; cards default to collapsed.
 - Tasks: "Add a task" input + Add task - tracked open/done, shown in chat when
   relevant. Export: Export Markdown / Export CSV buttons.
 - Plans advance in chat ("advance" continues a paused plan).

@@ -61,3 +61,16 @@ First write reused .modebtn for visual consistency without checking who owns the
 class. Rule: before reusing a styled class, grep who SELECTS it, not just who
 styles it. Fixed at the selector level (:not(.permswitch)), not with a parallel
 class.
+
+## 2026-09-27 - sandbox rebuild lost unpushed gen-32 stack (recovered)
+- What: the task sandbox was rebuilt mid-project; the local clone with the
+  unpushed gen-32 stack (b0afb35..617a71c) went with it.
+- Lesson: local-only commits are fragile across sandbox rebuilds. The
+  Instinct File revision (immutable, per publish) is the durable
+  checkpoint - gen 32 was recovered byte-clean from
+  filerevision-01M3GQXXY5E5694EDNKF8S82T0 (file checkout -> port files
+  back: openmuse.ts->app.js, style.css->styles.css, BODY string->index.html
+  body, bump cache stamps). RULE 5 doctor green after recovery (19
+  self-tests pass).
+- Standing: commit + File-publish each passing build BEFORE long gaps;
+  treat the File revision id as the recovery key and record it in STATE.md.

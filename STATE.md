@@ -47,17 +47,20 @@
   item-by-item with runnable proof per item.
 
 
-- Local HEAD: gen 31 commit (permission modes: Observe/Ask/Auto header
-  control wired to Sentinel + autonomy) - see git log.
-- Live (Pages): gen 20-28, origin/main 0fc1bb2, byte-verified at deploy.
+- Local HEAD: gen 32 commit (Jelly activity row + PAN/Aadhaar cloak
+  patterns) - see git log. Recovered 2026-09-27 17:4x IST from Instinct
+  File revision filerevision-01M3GQXXY5E5694EDNKF8S82T0 after the sandbox
+  was rebuilt and the unpushed local stack was lost; RULE 5 doctor green
+  (19 self-tests pass) after recovery.
+- Live (Pages): gens 20-31, origin/main 12c7686.
   https://aeiouvcode.github.io/open-muse/
-- Staged locally, held at the gate: gens 29 (hub), 30 (hub v2), 31
-  (permission modes) + docs commits.
+- Staged locally, held at the gate: gen 32 (Jelly activity row, PAN/Aadhaar
+  cloak patterns).
 - Gate (owner, Sep 26 17:26 via main, supersedes Sep 25 GO): nothing goes
   live - no public Pages deploy, no public File publish - without his
   explicit yes relayed by main. Commits, QA, push prep, PRIVATE File
   publishes are expected.
-- Instinct File (PRIVATE): current at gen 31.
+- Instinct File (PRIVATE): current at gen 32.
   https://files.instinct.com/file-01M326APAT2KA6SM3C2HG5XAEB
 - Midnight wake (00:30 IST): push-prep only - inventories the staged diff,
   re-verifies QA locally, reports readiness. No push.
