@@ -347,6 +347,23 @@ function goalsCSV(){
   S().goals.forEach(g=>g.plan.steps.forEach(x=>rows.push([g.title,g.status,g.due||"",g.note||"",x.title,x.status,x.kind,x.output||""])));
   return rows.map(r=>r.map(csvCell).join(",")).join("\n");
 }
+/* Jelly-pattern activity row: the work trail collapses into one compact
+   line - "Worked for Ns" from real per-step timestamps (agent-run steps
+   only; user and rejected steps contribute nothing, never a fake duration).
+   expandedGoals is session-only; cards default to collapsed. */
+const expandedGoals = new Set();
+const fmtDur = ms => { const s=Math.max(1,Math.round(ms/1000)); if(s<60) return s+"s"; const m=Math.floor(s/60),rs=s%60; if(m<60) return rs?m+"m "+rs+"s":m+"m"; const h=Math.floor(m/60),rm=m%60; return rm?h+"h "+rm+"m":h+"h"; };
+function actRow(g){
+  const workedMs = g.plan.steps.reduce((t,x)=> t + ((x.started&&x.finished) ? Math.max(0, new Date(x.finished)-new Date(x.started)) : 0), 0);
+  const open = expandedGoals.has(g.id);
+  const n = g.plan.steps.length;
+  const row = `<button class="actrow" data-actoggle="${g.id}" aria-expanded="${open}"><span class="ar-ic">${open?"\u25be":"\u25b8"}</span>${workedMs>0?`Worked for ${fmtDur(workedMs)} \u00b7 `:""}${n} step${n===1?"":"s"}${open?" \u00b7 hide":" \u00b7 show"}</button>`;
+  if(!open) return row;
+  return row + `<div class="steps">${g.plan.steps.map((x,i)=>{
+    const ic = x.status==="done"?"\u2713":x.status==="approval"?"\u23f8":x.status==="doing"?"\u2026":x.kind==="user"?"\u25cc":"\u00b7";
+    return `<div class="step ${x.status}" draggable="true" data-dragstep="${g.id}|${x.id}" ${x.status==="done"?`data-reopen="${g.id}|${x.id}" title="Click to reopen this step"`:""}><span class="drag" aria-hidden="true">\u283f</span><span class="ic">${ic}</span><span class="st-t">${esc(x.title)}</span><span class="stepmoves"><button class="iconbtn" aria-label="Move step up" data-move="${g.id}|${x.id}|-1" ${i===0?"disabled":""}>\u2191</button><button class="iconbtn" aria-label="Move step down" data-move="${g.id}|${x.id}|1" ${i===g.plan.steps.length-1?"disabled":""}>\u2193</button></span><span class="tag">${x.kind}</span></div>`;
+  }).join("")}</div>`;
+}
 function renderGoals(){
   const s=S(); if(!s) return;
   const strip=$("#duestrip");
@@ -364,10 +381,7 @@ function renderGoals(){
       <div class="goalmeta">${g.status==="done"?'<span class="pill ok">Archived complete</span>':""}${di?`<span class="pill ${di.days<0?"bad":di.days<=3?"warn":""}">${esc(di.label)} · ${esc(g.due)}</span>`:""}${g.note?`<span class="steernote" title="Injected into every planning and execution prompt">↳ ${esc(g.note)}</span>`:""}</div>
       <div class="progbar"><i style="width:${pct}%"></i></div>
       <div class="small" style="font-size:11.5px;color:var(--dim)">${done}/${g.plan.steps.length} steps · ${g.status}</div>
-      <div class="steps">${g.plan.steps.map((x,i)=>{
-        const ic = x.status==="done"?"✓":x.status==="approval"?"⏸":x.status==="doing"?"…":x.kind==="user"?"◌":"·";
-        return `<div class="step ${x.status}" draggable="true" data-dragstep="${g.id}|${x.id}" ${x.status==="done"?`data-reopen="${g.id}|${x.id}" title="Click to reopen this step"`:""}><span class="drag" aria-hidden="true">⠿</span><span class="ic">${ic}</span><span class="st-t">${esc(x.title)}</span><span class="stepmoves"><button class="iconbtn" aria-label="Move step up" data-move="${g.id}|${x.id}|-1" ${i===0?"disabled":""}>↑</button><button class="iconbtn" aria-label="Move step down" data-move="${g.id}|${x.id}|1" ${i===g.plan.steps.length-1?"disabled":""}>↓</button></span><span class="tag">${x.kind}</span></div>`;
-      }).join("")}</div>
+      ${actRow(g)}
       <div class="row">
         <button class="btn pri" data-advance="${g.id}" ${g.status==="done"?"disabled":""}>${g.status==="done"?"Complete":"Advance"}</button>
         <button class="btn" data-discuss="${g.id}">Discuss</button>
@@ -391,6 +405,7 @@ function renderGoals(){
   });
   $$('[data-tune]').forEach(b=>b.onclick=()=>{ const g=S().goals.find(x=>x.id===b.dataset.tune); openModal(`<h3>Tune goal</h3><div class="sub">Steering rides every planning and execution prompt. Due dates power the 14-day strip and deadline nudges.</div><div class="field"><label>Steering note</label><textarea id="gsteer" rows="3" maxlength="500" placeholder="e.g. Keep it practical; budget ₹5,000; no meetings">${esc(g.note||"")}</textarea></div><div class="field"><label>Due date</label><input id="gdue" type="date" value="${esc(g.due||"")}"></div><div class="row"><button class="btn modal-cancel">Cancel</button><button class="btn pri" id="savetune">Save</button></div>`); $('#savetune').onclick=async()=>{ g.note=$('#gsteer').value.trim(); g.due=$('#gdue').value; closeModal(); await audit('goal',`Updated steering/deadline for "${g.title}"`); await Store.save(); renderGoals(); toast('Goal tuned. New guidance will ride every prompt.'); }; });
   $$('[data-advance]').forEach(b=>b.onclick=()=>advanceGoal(b.dataset.advance));
+  $$('[data-actoggle]').forEach(b=>b.onclick=()=>{ const id=b.dataset.actoggle; if(expandedGoals.has(id)) expandedGoals.delete(id); else expandedGoals.add(id); renderGoals(); });
   $$('[data-team]').forEach(b=>b.onclick=()=>{ const [gid,md]=b.dataset.team.split('|'); runTeam(gid,md); });
   $$('[data-discuss]').forEach(b=>b.onclick=e=>{ switchView('chat'); const goal=S().goals.find(x=>x.id===e.currentTarget.dataset.discuss); if(goal){ $('#chatinput').value=`About my goal "${goal.title}": `; $('#chatinput').focus(); } });
   $$('[data-reopen]').forEach(b=>b.onclick=async e=>{ if(e.target.closest('button'))return; const [gid,sid]=b.dataset.reopen.split('|'); const g=S().goals.find(x=>x.id===gid),st=g&&g.plan.steps.find(x=>x.id===sid); if(!st)return; st.status='todo';st.output='';g.status='active';await audit('plan',`Reopened step: "${st.title}" (goal: "${g.title}")`);await Store.save();renderGoals();renderStatus();toast('Step reopened.'); });
@@ -770,6 +785,8 @@ const CLOAK_DETECTORS = [
   {kind:"phone", re:/\+\d[\d\s().-]{7,16}\d|\b\d{3}[ -]\d{3}[ -]\d{4}\b/g},
   {kind:"card",  re:/\b(?:\d[ -]?){13,19}\b/g, luhn:true},
   {kind:"id",    re:/\b\d{3}-\d{2}-\d{4}\b/g},
+  {kind:"pan",   re:/\b[A-Z]{5}\d{4}[A-Z]\b/g},
+  {kind:"aadhaar", re:/\b\d{4} \d{4} \d{4}\b(?!\s*\d)/g},
 ];
 function luhnOk(num){ const d=num.replace(/\D/g,""); if(d.length<13||d.length>19) return false; let sum=0,alt=false; for(let i=d.length-1;i>=0;i--){ let n=+d[i]; if(alt){ n*=2; if(n>9)n-=9; } sum+=n; alt=!alt; } return sum%10===0; }
 function cloakPick(str,n){ let h=0; for(const c of String(str)) h=(h*31 + c.codePointAt(0))>>>0; return h%n; }
@@ -778,6 +795,8 @@ function cloakTwin(real, kind){
   if(kind==="phone") return "+1 555 01"+String(cloakPick(real,90)+10);
   if(kind==="card")  return "4111 1111 1111 "+String(1000+cloakPick(real,9000));
   if(kind==="id")    return "9"+String(10+cloakPick(real,89))+"-55-"+String(7000+cloakPick(real+"x",999));
+  if(kind==="pan")   return "MUSE"+String.fromCharCode(65+cloakPick(real,26))+String(1000+cloakPick(real+"p",9000))+String.fromCharCode(65+cloakPick(real+"q",26));
+  if(kind==="aadhaar") return "9"+String(100+cloakPick(real,900))+" "+String(1000+cloakPick(real+"a",9000))+" "+String(1000+cloakPick(real+"b",9000));
   return CLOAK_NAME_POOL[cloakPick(real,CLOAK_NAME_POOL.length)];
 }
 function escRe(s){ return s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"); }
@@ -1029,7 +1048,7 @@ const LocalEngine = {
   worker:null, loadedModel:"", device:"", dtype:"", seq:Promise.resolve(), inflight:{}, onProgress:null, _load:null, _probe:null, dlCancel:false,
   ensure(){
     if(this.worker) return;
-    this.worker = new Worker("engine-worker.js?v=202609270540", { type:"module" });
+    this.worker = new Worker("engine-worker.js?v=202609271142", { type:"module" });
     this.worker.onmessage = (e)=> this.onmsg(e.data||{});
   },
   onmsg(d){
@@ -1630,7 +1649,7 @@ async function advanceGoal(id){
 async function runStep(g, step){
   const guidance=[g.note?`Steering note: ${g.note}`:"",g.due?`Deadline: ${g.due} (${dueInfo(g)?.label||""})`:""].filter(Boolean).join("\n");
   const prior = g.plan.steps.filter(x=>x.status==="done"&&x.output).map(x=>`Earlier step "${x.title}" produced:\n${x.output.slice(0,900)}`).join("\n\n");
-  step.status="doing"; renderGoals();
+  step.status="doing"; step.started=nowISO(); renderGoals();
   setRT({state:"working", step:step.title, tool:""});
   await audit("action",`Running step: "${step.title}" (goal: "${g.title}")`);
   try{
@@ -1638,12 +1657,12 @@ async function runStep(g, step){
       {role:"system", content: systemPrompt(g.title+" "+step.title)},
       {role:"user", content:`Execute this step of my goal and give me the finished work product, not a description of what you would do. Never say you cannot - produce the best possible artifact with what you know.\nGoal: ${g.title}\nStep: ${step.title}\n${guidance}\n${prior}\nProduce the actual artifact (draft text, plan, analysis, checklist, etc).`}
     ]);
-    step.output=out; step.status="done";
+    step.output=out; step.status="done"; step.finished=nowISO();
     await addMsg("muse", `Done with “${step.title}” (${g.title}):\n\n${out.slice(0,1800)}`);
     await audit("action",`Completed step: "${step.title}"`);
     setRT({last:"Completed: "+step.title.slice(0,60)});
   }catch(e){
-    step.status="todo";
+    step.status="todo"; delete step.started;
     setRT({last:"Failed: "+step.title.slice(0,60)});
     await addMsg("sys", `Step “${step.title}” hit a problem: ${friendlyModelError(e)}`);
     await audit("error",`Step failed: "${step.title}" (${e.message})`);
@@ -3042,6 +3061,62 @@ async function runSelfTests(){
       out.push({name:"404 page served",pass:r.ok && /not here|not found/i.test(await r.text())});
     } else out.push({name:"404 page (off Pages)",pass:true,note:"checked on the deployed site"});
   }catch(e){ out.push({name:"surface standards",pass:false,note:humanError(e)}); }
+  // PII sentinel fixture matrix (PLAN 2026-09-27 move 3): the same canary
+  // transcript through every outbound path, Broker.use stubbed to capture -
+  // no network. Leak-proof: any future bypass of Cloak turns a row RED.
+  try{
+    const st = S();
+    if(!st.counters) st.counters = {};
+    const saved = {
+      cloak: JSON.parse(JSON.stringify(st.cloak||{on:false,rules:[]})),
+      provider: st.settings.provider, model: st.settings.model, searchProvider: st.settings.searchProvider,
+      use: Broker.use, has: Broker.has, edgeInfer: EdgeBridge.infer,
+      localInfer: LocalEngine.infer, localModel: LocalEngine.loadedModel,
+      swaps: st.counters.cloakSwaps||0
+    };
+    const calls = [];
+    try{
+      st.cloak = { on:true, rules:[] };
+      const CAN = { name:"Persephone Amberjack", email:"aarav.sharma@example.org", phone:"+91 98111 22334", card:"4111 1111 1111 1111", id:"123-45-6789", pan:"BQXPK2214R", aadhaar:"2345 6789 0123" };
+      Cloak.ensure(CAN.name, "name");
+      const nameTwin = (Cloak.rules().find(r=>r.real===CAN.name)||{}).twin || "";
+      const transcript = ()=>[{role:"user", content:`Reach ${CAN.name} at ${CAN.email} or ${CAN.phone}; card ${CAN.card}, ssn ${CAN.id}, pan ${CAN.pan}, aadhaar ${CAN.aadhaar}.`}];
+      const leaks = txt => Object.values(CAN).filter(c=>txt.includes(c));
+      Broker.has = ()=>true;
+      Broker.use = async (name, url, opts)=>{ calls.push({name, url:String(url), body:String(opts&&opts.body||"")}); return new Response(JSON.stringify({choices:[{message:{content:"noted "+nameTwin}}], results:[]}),{status:200, headers:{"Content-Type":"application/json"}}); };
+      for(const key of ["gemini","openrouter","tokenharbor","local","nim"]){
+        calls.length = 0;
+        st.settings.provider = key; st.settings.model = "matrix-model";
+        const reply = await chatOnce(transcript(), false, "matrix-model");
+        const sent = calls.map(c=>c.url+"\n"+c.body).join("\n");
+        const hit = leaks(sent);
+        out.push({ name:"cloak matrix: "+key, pass: calls.length===1 && hit.length===0 && nameTwin!=="" && sent.includes(nameTwin),
+          note: hit.length ? ("LEAKED: "+hit.join(", ")) : "" });
+        if(key==="gemini") out.push({ name:"cloak matrix: reply un-swap", pass: reply.includes(CAN.name), note:"" });
+      }
+      calls.length = 0; let edgeSeen = "";
+      EdgeBridge.infer = async (msgs)=>{ edgeSeen = JSON.stringify(msgs); return "noted "+nameTwin; };
+      st.settings.provider = "edge"; st.settings.model = "matrix-model";
+      { const reply = await chatOnce(transcript(), false, "matrix-model"); const hit = leaks(edgeSeen);
+        out.push({ name:"cloak matrix: edge", pass: hit.length===0 && edgeSeen.includes(nameTwin) && reply.includes(CAN.name), note: hit.length?("LEAKED: "+hit.join(", ")):"" }); }
+      calls.length = 0; let localSeen = "";
+      LocalEngine.loadedModel = "matrix-model"; LocalEngine.infer = async (msgs)=>{ localSeen = JSON.stringify(msgs); return "local reply"; };
+      st.settings.provider = "engine";
+      { await chatOnce(transcript(), false, ""); 
+        out.push({ name:"cloak matrix: builtin stays on-device", pass: calls.length===0 && localSeen.includes(CAN.email), note:"" }); }
+      for(const sp of ["tinyfish","tavily"]){
+        calls.length = 0; st.settings.searchProvider = sp;
+        await webSearch(`contact ${CAN.email} or ${CAN.phone}`);
+        const sent = calls.map(c=>{ let u = c.url; try{ u = decodeURIComponent(u); }catch(e){} return u+"\n"+c.body; }).join("\n"); const hit = leaks(sent);
+        out.push({ name:"cloak matrix: web search ("+sp+")", pass: hit.length===0, note: hit.length?("LEAKED: "+hit.join(", ")):"" });
+      }
+    } finally {
+      st.cloak = saved.cloak; st.settings.provider = saved.provider; st.settings.model = saved.model; st.settings.searchProvider = saved.searchProvider;
+      Broker.use = saved.use; Broker.has = saved.has; EdgeBridge.infer = saved.edgeInfer;
+      LocalEngine.infer = saved.localInfer; LocalEngine.loadedModel = saved.localModel;
+      st.counters.cloakSwaps = saved.swaps;
+    }
+  }catch(e){ out.push({name:"cloak fixture matrix", pass:false, note:humanError(e)}); }
   return out;
 }
 
@@ -3336,6 +3411,7 @@ function calcEval(expr){
   return String(Math.round(v*1e10)/1e10);
 }
 async function webSearch(q){
+  q = Cloak.outText(q).text; // chokepoint: nothing user-typed leaves uncloaked (PLAN move 3)
   const pv = S().settings.searchProvider || "tinyfish";
   if(!Broker.has("search")) throw new Error("needs a search API key - add one in Tools (TinyFish's key is free, no card)");
   if(pv==="tinyfish"){
