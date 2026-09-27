@@ -1020,16 +1020,16 @@ const Broker = (()=>{
    the device. ENGINE_MODELS is the curated catalog - sizes are the honest
    q4/q4f16 download ranges from the model hubs. */
 const ENGINE_MODELS = [
-  { id:"onnx-community/SmolLM2-360M-Instruct-ONNX", label:"SmolLM2 360M - tiny, fits anywhere", size:"~0.26-0.37 GB" },
-  { id:"onnx-community/Qwen3-0.6B-Instruct-ONNX", label:"Qwen3 0.6B - fastest, made for phones", size:"~0.6-0.95 GB" },
-  { id:"onnx-community/Qwen2.5-1.5B-Instruct",    label:"Qwen2.5 1.5B - sharper, heavier",       size:"~1.2-1.7 GB" },
-  { id:"onnx-community/Llama-3.2-3B-Instruct-ONNX", label:"Llama 3.2 3B - desktop-class",        size:"~2 GB" },
+  { id:"onnx-community/SmolLM2-360M-Instruct-ONNX", label:"SmolLM2 360M - tiny, fits anywhere", size:"~0.26-0.37 GB", mb:[260,370],  blurb:"Answers simple asks, weakest writer of the four" },
+  { id:"onnx-community/Qwen3-0.6B-Instruct-ONNX", label:"Qwen3 0.6B - fastest, made for phones", size:"~0.6-0.95 GB", mb:[600,950],  blurb:"Best speed-to-sense ratio for a phone" },
+  { id:"onnx-community/Qwen2.5-1.5B-Instruct",    label:"Qwen2.5 1.5B - sharper, heavier",       size:"~1.2-1.7 GB", mb:[1200,1700], blurb:"Noticeably sharper, needs a decent phone or laptop" },
+  { id:"onnx-community/Llama-3.2-3B-Instruct-ONNX", label:"Llama 3.2 3B - desktop-class",        size:"~2 GB",       mb:[1900,2300], blurb:"The strongest here - wants a real laptop" },
 ];
 const LocalEngine = {
-  worker:null, loadedModel:"", device:"", dtype:"", seq:Promise.resolve(), inflight:{}, onProgress:null, _load:null, _probe:null,
+  worker:null, loadedModel:"", device:"", dtype:"", seq:Promise.resolve(), inflight:{}, onProgress:null, _load:null, _probe:null, dlCancel:false,
   ensure(){
     if(this.worker) return;
-    this.worker = new Worker("engine-worker.js?v=202609231548", { type:"module" });
+    this.worker = new Worker("engine-worker.js?v=202609270540", { type:"module" });
     this.worker.onmessage = (e)=> this.onmsg(e.data||{});
   },
   onmsg(d){
@@ -1069,6 +1069,7 @@ const LocalEngine = {
     if(!rt.ok) throw new Error("engine-model-list-"+rt.status);
     const tree = await rt.json();
     const paths = tree.filter(f=>f.type==="file").map(f=>f.path);
+    if(this.dlCancel) throw new Error("download-cancelled");
     const wanted = [];
     for(const p of ["config.json","generation_config.json","tokenizer.json","tokenizer_config.json","special_tokens_map.json"]) if(paths.includes(p)) wanted.push(p);
     let weights = paths.filter(p=>p==="onnx/model_"+dtype+".onnx" || p==="onnx/model_"+dtype+".onnx_data");
@@ -1082,15 +1083,24 @@ const LocalEngine = {
     }
   },
   async dlChunked(url, cache, fname){
+    /* Resumable by construction: every verified chunk is stored as its own
+       entry in a "transformers-partial" cache with a truthful Content-Range
+       header before the next one starts. A cancelled or crashed download
+       resumes from the stored parts - total and offset come from the parts
+       themselves, so no byte is fetched twice. On completion the parts are
+       Blob-concatenated (disk-backed, no full-RAM copy) into the main cache
+       and the parts are deleted. Corrupt or stale parts fail loud: they are
+       deleted and refetched. */
     const CH = 24*1024*1024;
     const prog = (loaded,total)=>{ if(this.onProgress) this.onProgress({type:"progress", file:fname, loaded, total, progress: total? Math.round(loaded/total*100) : 0}); };
     const sleep = ms=>new Promise(r=>setTimeout(r,ms));
+    const pcache = await caches.open("transformers-partial");
     const get = async (start,end,tries)=>{
       let last=null;
       for(let a=1;a<=tries;a++){
         try{
           const r = await fetch(url,{headers:{Range:"bytes="+start+"-"+end}});
-          if(r.status===200) return {whole:true, response:r};
+          if(r.status===200 && start===0) return {whole:true, response:r};
           if(r.status!==206) throw new Error("http-"+r.status);
           const cr=r.headers.get("content-range")||"";
           const total=parseInt((cr.split("/")[1]||"0"),10)||(end-start+1);
@@ -1101,17 +1111,51 @@ const LocalEngine = {
       }
       throw last||new Error("chunk-failed");
     };
-    const probe = await get(0, CH-1, 3);
-    if(probe.whole){ await cache.put(url, probe.response); return; }
-    const total = probe.total;
-    if(total<=CH){ await cache.put(url, new Response(probe.buf,{status:200,headers:{"Content-Type":probe.type,"Content-Length":String(total)}})); return; }
-    const parts=[probe.buf]; let got=probe.buf.byteLength;
+    const putPart = (start, buf, total, type)=> pcache.put(url+"?ompart="+start,
+      new Response(buf, {headers:{"Content-Range":"bytes "+start+"-"+(start+buf.byteLength-1)+"/"+total, "Content-Type":type, "Content-Length":String(buf.byteLength)}}));
+    // resume: read stored parts, verify they are contiguous from byte 0
+    // and all agree on the total. Anything else is dropped (fail loud).
+    let got=0, total=0, type="application/octet-stream";
+    {
+      const keys = (await pcache.keys()).filter(r=>r.url.startsWith(url+"?ompart="));
+      const parts = [];
+      for(const k of keys){
+        const r = await pcache.match(k);
+        const m = r && (r.headers.get("content-range")||"").match(/bytes (\d+)-(\d+)\/(\d+)/);
+        if(!m || +m[2]-+m[1]+1 !== +(r.headers.get("content-length")||-1)){ await pcache.delete(k); continue; }
+        parts.push({start:+m[1], end:+m[2], total:+m[3], type:r.headers.get("content-type")||type});
+      }
+      parts.sort((a,b)=>a.start-b.start);
+      for(const p of parts){
+        if(p.start!==got || (total && p.total!==total)){
+          for(const k of keys) await pcache.delete(k);
+          got=0; total=0;
+          break;
+        }
+        got=p.end+1; total=p.total; type=p.type;
+      }
+    }
+    if(!got){
+      const probe = await get(0, CH-1, 3);
+      if(probe.whole){ await cache.put(url, probe.response); return; }
+      total = probe.total; type = probe.type;
+      if(total<=CH){ await cache.put(url, new Response(probe.buf,{status:200,headers:{"Content-Type":type,"Content-Length":String(total)}})); return; }
+      await putPart(0, probe.buf, total, type);
+      got = probe.buf.byteLength;
+    }
     prog(got,total);
     while(got<total){
+      if(this.dlCancel) throw new Error("download-cancelled");
       const part = await get(got, Math.min(got+CH,total)-1, 4);
-      parts.push(part.buf); got+=part.buf.byteLength; prog(got,total);
+      await putPart(got, part.buf, total, type);
+      got += part.buf.byteLength; prog(got,total);
     }
-    await cache.put(url, new Response(new Blob(parts), {status:200, headers:{"Content-Type":probe.type,"Content-Length":String(total)}}));
+    const keys = (await pcache.keys()).filter(r=>r.url.startsWith(url+"?ompart="))
+      .sort((a,b)=>parseInt(a.url.split("?ompart=")[1],10)-parseInt(b.url.split("?ompart=")[1],10));
+    const blobs = [];
+    for(const k of keys){ const r = await pcache.match(k); blobs.push(await r.blob()); }
+    await cache.put(url, new Response(new Blob(blobs), {status:200, headers:{"Content-Type":type,"Content-Length":String(total)}}));
+    for(const k of keys) await pcache.delete(k);
   },
   stop(){ if(this.worker) this.worker.postMessage({type:"stop"}); },
   infer(messages, opts){
@@ -1502,6 +1546,29 @@ What you remember about the user:
 ${mem}`;
 }
 
+/* ---------------- permission modes (T3 Code pattern, our mechanics) ----------------
+   One source of truth: settings.permMode in {observe, ask, autonomous}.
+   settings.autonomy is kept in sync (true only in autonomous) so every
+   existing guard - autoAdvance, automations, coder - works untouched.
+   Observe runs nothing: advanceGoal holds steps and approval settlement is
+   refused. Ask runs only what the user explicitly advances, sensitive
+   steps still pause on the Sentinel card. Autonomous is the standing
+   behavior: routine steps auto-advance, sensitive ones always wait. */
+const permMode = () => (S() && S().settings.permMode) || "autonomous";
+function renderPermMode(){
+  const m = permMode();
+  $$("#permswitch [data-perm]").forEach(b=>b.classList.toggle("on", b.dataset.perm===m));
+}
+async function setPermMode(m){
+  if(["observe","ask","autonomous"].indexOf(m)<0) return;
+  const s=S(); if(!s) return;
+  s.settings.permMode=m; s.settings.autonomy = m==="autonomous";
+  await audit("settings", "Permission mode: "+m);
+  await Store.save(); renderPermMode();
+  const acb=$("#autonomycb"); if(acb) acb.checked = m==="autonomous";
+  if(m==="autonomous"){ const g=S().goals.find(x=>x.status==="active"); if(g) autoAdvance(g.id); }
+}
+
 /* ---------------- sentinel policy ---------------- */
 const SENSITIVE = /\b(send|email|message|share|post|publish|buy|purchase|pay|book|order|invite|transfer|delete|schedule)\b/i;
 function sentinelCheck(step){
@@ -1544,6 +1611,11 @@ async function advanceGoal(id){
     step.status="done"; g.status = g.plan.steps.every(x=>x.status==="done")?"done":"active";
     await addMsg("muse", `I marked “${step.title}” on “${g.title}” as handled - that one was yours to do in the world. Say the word if it isn't actually done and I'll reopen it.`);
     await Store.save(); renderAll(); return;
+  }
+  if(permMode()==="observe"){
+    await audit("sentinel", `Observe mode held step "${step.title}" on "${g.title}" - watching, not acting`);
+    await addMsg("sys", `Observe mode is on: I planned “${step.title}” (${g.title}) but won't run it while Observe is active. Switch to Ask or Auto in the header when you want me to act.`);
+    return;
   }
   const check=sentinelCheck(step);
   if(check.sensitive && step.status!=="approval"){
@@ -1617,6 +1689,11 @@ async function decideStep(pair, ok){
     if(card) card.remove();
     await addMsg("sys", `<div class="card resolved"><h4>${ok?"✓ Approved":"✕ Rejected"}</h4><div class="small"><b>${esc(st.title)}</b> - ${ok?"running it now":"skipped"}. Recorded ${new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}; the audit trail keeps both outcomes.</div></div>`, "card");
   };
+  if(ok && permMode()==="observe"){
+    toast("Observe mode is on - Muse won't run steps. Switch to Ask or Auto first.");
+    await audit("sentinel",`Approval of "${st.title}" held - Observe mode runs nothing`);
+    return;
+  }
   if(ok){
     await audit("approval",`Approved: "${st.title}"`);
     logWork(`Approved sensitive step "${st.title}" (goal: ${g.title})`);
@@ -1829,7 +1906,7 @@ function proactiveLedger(){ const s=S(); if(!s.proactivity) s.proactivity={kinds
 function kindStats(kind){ const P=proactiveLedger(); if(!P.kinds[kind]) P.kinds[kind]={proposed:0,accepted:0,dismissed:0,ignored:0,muted:false}; return P.kinds[kind]; }
 function gateVerdict(kind){
   const P=proactiveLedger(); const now=Date.now();
-  if(!S().settings.autonomy) return "autonomy is off";
+  if(!S().settings.autonomy) return "permission mode is "+permMode();
   if(mode()==="chat") return "chat mode - plain talk, no proposals";
   const k=kindStats(kind);
   if(k.muted) return `kind "${kind}" muted (acceptance ran near zero)`;
@@ -2122,7 +2199,223 @@ function renderEngine(){
     st.textContent=model&&ENGINE_MODELS.some(m=>m.id===model)?("Picked: "+model.split("/").pop()+" - not loaded yet."):"Pick a model above, then load it here.";
     $("#engineunload").hidden=true; $("#engineload").textContent="Load model"; $("#enginebench").hidden=true;
   }
+  ModelHub.render();
 }
+
+/* ---------------- model hub ----------------
+   Jan's home turf, done our way: the catalog is the first-run path, every
+   claim about fit is either measured on this device or labelled an estimate,
+   downloads are cancellable, and storage accounting is honest. */
+const ModelHub = (()=>{
+  const CACHE="transformers-cache";
+  const fmtMB = b => b>=1073741824 ? (b/1073741824).toFixed(1)+" GB" : Math.round(b/1048576)+" MB";
+  async function cachedSizes(){
+    const out={};
+    try{
+      if(!("caches" in self)) return out;
+      const cache = await caches.open(CACHE);
+      const keys = await cache.keys();
+      for(const req of keys){
+        const m = req.url.match(/huggingface\.co\/([^/]+\/[^/]+)\/resolve\//);
+        if(!m) continue;
+        const r = await cache.match(req);
+        const len = r && +(r.headers.get("content-length")||0) || 0;
+        out[m[1]] = (out[m[1]]||0) + len;
+      }
+    }catch(e){}
+    return out;
+  }
+  function fitLabel(entry, bench){
+    const b = bench && bench[entry.id];
+    if(b && b.tokPerSec!=null){
+      if(b.tokPerSec>=8) return {txt:"proven fast here", cls:"good"};
+      if(b.tokPerSec>=3) return {txt:"works here - measured", cls:"good"};
+      return {txt:"measured slow here", cls:"warn"};
+    }
+    const dm = navigator.deviceMemory;
+    if(!dm) return {txt:"fit unknown - Test tells the truth", cls:""};
+    const hi = entry.mb ? entry.mb[1] : 1000;
+    if(hi <= dm*1024*0.35) return {txt:"comfortable here (estimate)", cls:"good"};
+    if(hi <= dm*1024*0.6)  return {txt:"tight here (estimate)", cls:"warn"};
+    return {txt:"likely too heavy here (estimate)", cls:"bad"};
+  }
+  async function render(){
+    const host=$("#modelhub"); if(!host || $("#enginewrap").hidden) return;
+    const sizes = await cachedSizes();
+    const bench = (S()&&S().settings.bench)||{};
+    const active = (S()&&S().settings.model)||"";
+    let est="";
+    try{
+      const e = await navigator.storage.estimate();
+      if(e && e.quota) est = '<div class="small" style="font-size:11.5px;color:var(--dim2);margin-top:10px">Browser storage: '+fmtMB(e.usage||0)+' used of about '+fmtMB(e.quota)+'. Models live in this browser\'s cache - clearing site data removes them.</div>';
+    }catch(e){}
+    host.innerHTML = '<div class="lbl" style="margin:16px 0 8px">Find models</div>'
+      + '<div class="mhsearchrow"><input id="mhq" type="search" enterkeyhint="search" placeholder="Search Hugging Face - qwen3, smollm, gemma..." autocomplete="off"><button class="btn sm" id="mhgo" type="button">Search</button></div>'
+      + '<div id="mhresults"></div>'
+      + '<div class="lbl" style="margin:16px 0 8px">Model library</div>'
+      + ENGINE_MODELS.map(m=>{
+        const bytes = sizes[m.id]||0;
+        const got = bytes>0;
+        const fit = fitLabel(m, bench);
+        const isActive = active===m.id;
+        const isLoaded = LocalEngine.loadedModel===m.id;
+        const short = m.id.split("/").pop();
+        return '<div class="mhcard'+(isActive?' on':'')+'">'
+          + '<div class="mhtitle">'+esc(short)+(isLoaded?' <span class="memchip">loaded</span>':(isActive?' <span class="memchip">picked</span>':''))+'</div>'
+          + '<div class="mhmeta">'+esc(m.label.split(" - ")[1]||"")+' · '+esc(m.size)+' · <span class="mhfit '+fit.cls+'">'+esc(fit.txt)+'</span></div>'
+          + '<div class="mhmeta" style="color:var(--dim2)">'+esc(m.blurb)+'</div>'
+          + '<div class="mhstate">'+(got? 'On this device: '+fmtMB(bytes) : 'Not downloaded yet')+'</div>'
+          + '<div class="mhprog" data-mhprog="'+esc(m.id)+'"></div>'
+          + '<div class="mhrow">'
+          +   (isActive
+               ? '<button class="btn sm pri" data-mhload="'+esc(m.id)+'">'+(isLoaded?'Loaded':'Load')+'</button>'
+               : '<button class="btn sm" data-mhuse="'+esc(m.id)+'">Use</button>')
+          +   (got
+               ? '<button class="btn sm" data-mhtest="'+esc(m.id)+'">Test</button><button class="btn sm" data-mhdel="'+esc(m.id)+'">Delete</button>'
+               : '<button class="btn sm pri" data-mhdl="'+esc(m.id)+'">Download</button><button class="btn sm" data-mhtest="'+esc(m.id)+'">Test</button>')
+          + '</div></div>';
+      }).join("") + est;
+    bind();
+  }
+  function prog(id){ return host0().querySelector('[data-mhprog="'+CSS.escape(id)+'"]'); }
+  const fmtN = n => n>=1000000 ? (n/1000000).toFixed(1)+"M" : n>=1000 ? Math.round(n/1000)+"K" : String(n);
+  /* HF community search: two queries in parallel - the general ONNX-tagged
+     catalog and the onnx-community org (whose repos follow the exact layout
+     the engine expects) - merged, deduped, sorted by downloads. Sizes are
+     never guessed: the card says size is measured at download, and the
+     download probe is what measures it. Repos without the ONNX layout the
+     engine needs fail loud with a humanized message from the load path. */
+  async function hubSearch(){
+    const inp=$("#mhq"), box=$("#mhresults"); if(!inp||!box) return;
+    const q=inp.value.trim(); if(!q){ box.innerHTML=""; return; }
+    box.innerHTML='<div class="small" style="font-size:12px;color:var(--dim);margin:8px 0">Searching Hugging Face for "'+esc(q)+'"...</div>';
+    try{
+      const enc=encodeURIComponent(q);
+      const ask = u=>fetch(u).then(r=>{ if(!r.ok) throw new Error("http-"+r.status); return r.json(); });
+      const [general, community] = await Promise.all([
+        ask("https://huggingface.co/api/models?search="+enc+"&filter=onnx&pipeline_tag=text-generation&limit=20&sort=downloads&direction=-1"),
+        ask("https://huggingface.co/api/models?author=onnx-community&search="+enc+"&pipeline_tag=text-generation&limit=20&sort=downloads&direction=-1"),
+      ]);
+      const seen={}, list=[];
+      for(const m of [...community, ...general]){
+        if(!m || !m.id || seen[m.id]) continue;
+        seen[m.id]=1;
+        list.push({id:m.id, downloads:m.downloads||0, likes:m.likes||0, community:m.id.startsWith("onnx-community/")});
+      }
+      list.sort((x,y)=>y.downloads-x.downloads);
+      const top=list.slice(0,10);
+      if(!top.length){
+        box.innerHTML='<div class="small" style="font-size:12px;color:var(--dim);margin:8px 0">Nothing on Hugging Face matches "'+esc(q)+'" with ONNX text-generation weights - try another name.</div>';
+        return;
+      }
+      box.innerHTML = '<div class="lbl" style="margin:12px 0 8px">'+top.length+' result'+(top.length===1?'':'s')+' for "'+esc(q)+'"</div>'
+        + top.map(m=>{
+          const short=m.id.split("/").pop();
+          return '<div class="mhcard">'
+            + '<div class="mhtitle">'+esc(short)+'</div>'
+            + '<div class="mhmeta">'+esc(m.id)+' · '+fmtN(m.downloads)+' downloads'+(m.community?' · <span class="mhfit good">matches the engine layout</span>':'')+'</div>'
+            + '<div class="mhstate" data-mhsize="'+esc(m.id)+'">Measuring the Q4 build from the repo listing...</div>'
+            + '<div class="mhprog" data-mhprog="'+esc(m.id)+'"></div>'
+            + '<div class="mhrow"><button class="btn sm pri" data-mhdl="'+esc(m.id)+'">Download</button><button class="btn sm" data-mhuse="'+esc(m.id)+'">Use</button></div>'
+            + '</div>';
+        }).join("");
+      bind();
+      /* Measured sizes: one repo listing per result, the same weight-picking
+         logic prefetch uses, sizes summed from the repo's own file metadata.
+         A fit estimate appears only once a real byte count exists; a repo
+         without the ONNX layout the engine needs says so plainly. */
+      Promise.all(top.map(async m=>{
+        const el = box.querySelector('[data-mhsize="'+CSS.escape(m.id)+'"]');
+        try{
+          const rt = await fetch("https://huggingface.co/api/models/"+m.id+"/tree/main?recursive=true");
+          if(!rt.ok) throw new Error("http-"+rt.status);
+          const tree = await rt.json();
+          const files = tree.filter(f=>f.type==="file");
+          let w = files.filter(f=>f.path==="onnx/model_q4.onnx" || f.path==="onnx/model_q4.onnx_data");
+          if(!w.length) w = files.filter(f=>f.path.startsWith("onnx/model_q4") && f.path.endsWith(".onnx"));
+          if(!w.length){ const q = files.filter(f=>f.path.startsWith("onnx/") && f.path.endsWith(".onnx")); if(q.length===1) w = q; }
+          if(!el) return;
+          if(!w.length){
+            el.innerHTML = "No Q4 ONNX build in this repo - the built-in engine needs one.";
+            const row = el.parentElement && el.parentElement.querySelector(".mhrow");
+            if(row) row.remove();
+            return;
+          }
+          const bytes = w.reduce((a,f)=>a+((f.lfs&&f.lfs.size)||f.size||0),0);
+          if(!bytes){ el.textContent = "Size is measured by the download itself - no guesses."; return; }
+          const fit = fitLabel({id:m.id, mb:[bytes/1048576, bytes/1048576]}, null);
+          el.innerHTML = "Q4 build: "+fmtMB(bytes)+" (from the repo\'s own listing) · <span class=\"mhfit "+fit.cls+"\">"+esc(fit.txt)+"</span>";
+        }catch(e){ if(el) el.textContent = "Size is measured by the download itself - no guesses."; }
+      }));
+    }catch(e){
+      box.innerHTML='<div class="small" style="font-size:12px;color:var(--dim);margin:8px 0">Search failed: '+esc(humanError(e,"Hugging Face did not answer"))+'.</div>';
+    }
+  }
+  function host0(){ return $("#modelhub"); }
+  function bind(){
+    $$("#modelhub [data-mhload]").forEach(b=>b.onclick=async()=>{
+      if(LocalEngine._load){ toast("The engine is busy - try again in a moment."); return; }
+      $("#engineload").click();
+    });
+    $$("#modelhub [data-mhuse]").forEach(b=>b.onclick=async()=>{
+      S().settings.model=b.dataset.mhuse; await Store.save();
+      if($("#setmodel")) $("#setmodel").value=b.dataset.mhuse;
+      renderEngine(); toast("Picked "+b.dataset.mhuse.split("/").pop()+" - load it when you're ready.");
+    });
+    const go=$("#mhgo"), mq=$("#mhq");
+    if(go) go.onclick=hubSearch;
+    if(mq) mq.onkeydown=(e)=>{ if(e.key==="Enter"){ e.preventDefault(); hubSearch(); } };
+    $$("#modelhub [data-mhdl]").forEach(b=>b.onclick=()=>download(b.dataset.mhdl, b));
+    $$("#modelhub [data-mhtest]").forEach(b=>b.onclick=()=>test(b.dataset.mhtest, b));
+    $$("#modelhub [data-mhdel]").forEach(b=>b.onclick=async()=>{
+      const id=b.dataset.mhdel;
+      if(LocalEngine.loadedModel===id){ $("#engineunload").click(); }
+      try{
+        const cache=await caches.open(CACHE);
+        const keys=await cache.keys();
+        let n=0;
+        for(const req of keys){ if(req.url.includes("huggingface.co/"+id+"/")){ await cache.delete(req); n++; } }
+        await audit("engine","Deleted on-device model "+id.split("/").pop()+" ("+n+" cached files)");
+        toast("Deleted "+id.split("/").pop()+" from this device.");
+      }catch(e){ toast("Delete hit a snag: "+humanError(e,"the cache would not open")+"."); }
+      render();
+    });
+  }
+  async function download(id, btn){
+    if(LocalEngine._load){ toast("The engine is busy - try again in a moment."); return; }
+    LocalEngine.dlCancel=false;
+    btn.outerHTML='<button class="btn sm" data-mhcancel="1">Cancel download</button>';
+    const cancelBtn=host0().querySelector("[data-mhcancel]");
+    if(cancelBtn) cancelBtn.onclick=()=>{ LocalEngine.dlCancel=true; };
+    const bar=prog(id);
+    LocalEngine.onProgress=(d)=>{
+      if(bar) bar.innerHTML='<div class="small" style="font-size:11.5px;color:var(--dim)">'+esc(d.file?("Fetching "+d.file.split("/").pop()):"Preparing...")+(d.total?(" - "+Math.round(d.loaded/1048576)+" of "+Math.round(d.total/1048576)+" MB"):"")+'</div><div class="ebar"><div style="width:'+(d.progress||0)+'%"></div></div>';
+    };
+    try{
+      await LocalEngine.load(id,"auto");
+      await audit("engine","Downloaded on-device model "+id.split("/").pop());
+      toast(id.split("/").pop()+" is on this device and loads - unloading to free memory.");
+      $("#engineunload").click();
+    }catch(e){
+      if(String(e.message||e).includes("download-cancelled")) toast("Download paused - it resumes where it left off next time.");
+      else toast("Download stopped: "+humanError(e,"the fetch failed")+".");
+    }finally{ LocalEngine.onProgress=null; renderEngine(); }
+  }
+  async function test(id, btn){
+    if(LocalEngine._load){ toast("The engine is busy - try again in a moment."); return; }
+    btn.disabled=true;
+    try{
+      if(LocalEngine.loadedModel!==id){
+        toast("Loading "+id.split("/").pop()+" to measure it...");
+        await LocalEngine.load(id,"auto");
+      }
+      renderEngine();
+      $("#enginebench").click();
+    }catch(e){ toast("Could not load it: "+humanError(e,"the engine refused")+"."); }
+    finally{ btn.disabled=false; }
+  }
+  return { render };
+})();
 
 /* ---------------- on-device benchmark ----------------
    Answers "which small model should I run" with this device's own evidence:
@@ -2150,7 +2443,13 @@ async function benchRun(){
   if(!LocalEngine.loadedModel){ out.innerHTML='<div class="small" style="font-size:12px;color:var(--dim)">Load a model first - the benchmark measures the loaded one.</div>'; return; }
   btn.disabled=true;
   const model=LocalEngine.loadedModel, device=LocalEngine.device||"wasm", dtype=LocalEngine.dtype||"";
-  const res={ model, device, dtype, ts:nowISO(), checks:{}, tFirst:0, tokPerSec:0 };
+  const res={ model, device, dtype, ts:nowISO(), checks:{}, tFirst:0, tokPerSec:0, peakMB:null };
+  /* Peak JS heap, sampled - Chrome exposes performance.memory; where it does
+     not, the line says "not measurable here" instead of inventing a number. */
+  let peak=0, memTimer=0;
+  if(window.performance && performance.memory && performance.memory.usedJSHeapSize){
+    memTimer = setInterval(()=>{ try{ peak=Math.max(peak, performance.memory.usedJSHeapSize); }catch(e){} }, 250);
+  }
   let done=0;
   const paint=()=>{ out.innerHTML='<div class="small" style="font-size:12px;color:var(--dim)">Benchmarking '+esc(model.split("/").pop())+' on '+esc(device)+' - '+done+' of '+BENCH.length+' checks...</div>'; };
   paint();
@@ -2171,8 +2470,10 @@ async function benchRun(){
     }catch(e){ res.checks[b.id]={pass:false, detail:"error: "+humanError(e, "the check itself errored")}; }
     done++; paint();
   }
+  if(memTimer) clearInterval(memTimer);
+  res.peakMB = peak ? Math.round(peak/1048576) : null;
   const s=S(); s.settings.bench=Object.assign({}, s.settings.bench, {[model]:res}); await Store.save();
-  await audit("engine", "Benchmarked "+model.split("/").pop()+" on "+device+": "+(res.tokPerSec||"?")+" tok/s, "+BENCH.filter(b=>b.check).map(b=>((res.checks[b.id]&&res.checks[b.id].pass)?"✓":"✕")+b.id).join(" "));
+  await audit("engine", "Benchmarked "+model.split("/").pop()+" on "+device+": "+(res.tokPerSec||"?")+" tok/s"+(res.peakMB?", peak heap "+res.peakMB+" MB":"")+", "+BENCH.filter(b=>b.check).map(b=>((res.checks[b.id]&&res.checks[b.id].pass)?"✓":"✕")+b.id).join(" "));
   btn.disabled=false; renderEngineBench();
 }
 function renderEngineBench(){
@@ -2182,6 +2483,7 @@ function renderEngineBench(){
   const rows=BENCH.map(x=>{ const c=b.checks[x.id]; if(!c) return "";
     return '<div class="small" style="font-size:12px;color:var(--dim)">'+(c.pass?"✓ ":"✕ ")+esc(x.label)+(c.detail?' <span style="color:var(--dim2)">- '+esc(c.detail)+"</span>":"")+"</div>"; }).join("");
   out.innerHTML='<div class="small" style="font-size:12px;color:var(--dim);margin-top:6px">Benchmark on this device ('+esc(b.device+(b.dtype?", "+b.dtype:""))+", "+new Date(b.ts).toLocaleDateString()+"):</div>"+rows
+    +'<div class="small" style="font-size:12px;color:var(--dim);margin-top:2px">'+(b.peakMB ? "Peak JS heap during the run: "+b.peakMB+" MB (measured here)." : "Peak memory: not measurable in this browser.")+'</div>'
     +'<div class="small" style="font-size:11.5px;color:var(--dim2);margin-top:4px">These numbers are this device\'s own - WASM vs WebGPU differ by a lot. Load another model and re-run to compare them head to head.</div>';
 }
 $("#enginebench").addEventListener("click", benchRun);
@@ -2571,7 +2873,7 @@ $("#sendbtn").addEventListener("click", sendChat);
 const mode = () => (S().settings.mode || "agent");
 function applyModeUI(){
   const m = mode();
-  $$(".modebtn").forEach(b=>b.classList.toggle("on", b.dataset.mode===m));
+  $$(".modeswitch:not(.permswitch) .modebtn").forEach(b=>b.classList.toggle("on", b.dataset.mode===m));
   $("#modebar").classList.toggle("coder", m==="coder");
   $("#modenote").textContent = m==="coder"
     ? "Coding agent - reads its own source, drafts diffs; patches never self-apply"
@@ -2592,7 +2894,7 @@ async function setMode(m){
   applyModeUI();
   await audit("mode", `Mode switched to ${m}`);
 }
-$$(".modebtn").forEach(b=>b.addEventListener("click", ()=>setMode(b.dataset.mode)));
+$$(".modeswitch:not(.permswitch) .modebtn").forEach(b=>b.addEventListener("click", ()=>setMode(b.dataset.mode)));
 
 let _srcCache = null;
 async function ownSource(){
@@ -3884,7 +4186,7 @@ async function runAutomation(a, late){
   if(TEAM.active){ await audit("automation",`Deferred "${a.text}" - a team/workforce owns the compute right now`); return; }
   await audit("automation",`Fired: "${a.text}" (${a.cadence})${late?" - late catch-up":""}`);
   if(!Broker.has("model") || S().settings.autonomy===false){
-    await addMsg("sys", `⏱ Automation due: "${esc(a.text)}" - ${!Broker.has("model")?"no model key is set":"autonomy is off"}, so it is parked here instead of running blind. Fix the gate and it fires on its own next cycle.`);
+    await addMsg("sys", `⏱ Automation due: "${esc(a.text)}" - ${!Broker.has("model")?"no model key is set":"permission mode is "+permMode()}, so it is parked here instead of running blind. Fix the gate and it fires on its own next cycle.`);
     await Store.save(); renderChat(); return;
   }
   await addMsg("sys", `⏱ Automation firing${late?" (late catch-up - Muse was asleep at the scheduled time; nothing ran while the tab was closed)":""}: "${esc(a.text)}"`);
@@ -4136,6 +4438,15 @@ function renderAppField(){
 })();
 async function finishBoot(){
   armIdleLock();
+  // permission-mode migration: absent permMode derives from the legacy boolean
+  if(!S().settings.permMode){ S().settings.permMode = S().settings.autonomy===false ? "ask" : "autonomous"; await Store.save(); }
+  renderPermMode();
+  $$("#permswitch [data-perm]").forEach(b=>b.addEventListener("click", ()=>{
+    setPermMode(b.dataset.perm);
+    toast(b.dataset.perm==="observe" ? "Observe - I'll plan and answer, but won't act."
+        : b.dataset.perm==="ask" ? "Ask first - nothing runs without your go-ahead."
+        : "Autonomous - routine steps run on their own; sensitive ones still wait for you.");
+  }));
   // first run on a fresh store: one welcome that says what this is and how to start
   if(!S().chat.length && !Broker.has("model")){
     await addMsg("muse", "Welcome to Open Muse - a personal agent that belongs to you. Everything it learns lives in this browser (encrypt it in Settings), and nothing runs anywhere but this tab.\n\nGive it a brain and it starts working: paste a **Gemini** key (free at aistudio.google.com/apikey - the most reliable free tier), pick **Local** with Ollama on this machine, or **EDGE//AI** on-device.");
@@ -4166,8 +4477,7 @@ async function finishBoot(){
     S().settings.dockCollapsed = c; await Store.save();
   });
   const acb=$("#autonomycb"); if(acb){ acb.checked = S().settings.autonomy!==false;
-    acb.addEventListener("change", async()=>{ S().settings.autonomy=acb.checked; await audit("settings","Autonomy "+(acb.checked?"on":"off")); await Store.save();
-      if(acb.checked){ const g=S().goals.find(x=>x.status==="active"); if(g) autoAdvance(g.id); } }); }
+    acb.addEventListener("change", async()=>{ await setPermMode(acb.checked ? "autonomous" : "ask"); }); }
 
   // orb sleep/wake: how long was Muse asleep?
   const gap = S().lastSeen ? Date.now()-new Date(S().lastSeen).getTime() : 0;

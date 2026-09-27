@@ -1,5 +1,9 @@
 # FEATURE MAP - Open Muse
 
+> Verification runs through scripts/control-openmuse.mjs (RULE 5): doctor,
+> snapshot, screenshot, wait-settle, interact. How-to-drive-via-CLI notes
+> get added per feature as they change.
+
 _Sitemap of every feature and how to reach/trigger it. Kept current with each
 behavior change (owner directive 2026-09-25). Use it to interpret vague bug
 reports: find the feature here, then check the trigger path. Code anchors are
@@ -12,6 +16,28 @@ Settings. Below: Chats (session drawer) + "+ New". Top-right of chat: status
 rail (provider/model/key presence) - tap opens Settings.
 
 ## Settings (#view-settings)
+- Find models (built-in engine): "Find models" search box in Settings -
+  queries Hugging Face live (ONNX text-generation filter + the
+  onnx-community org, merged by download count). Result cards show real
+  downloads, a "matches the engine layout" mark for onnx-community repos,
+  and a measured Q4 size + fit estimate from the repo's own file listing
+  (the same weight-picking logic the downloader uses). A repo without the
+  ONNX layout says so and offers no buttons. Download/Use work exactly like
+  the curated cards. Drive via CLI: eval script sets #mhq and clicks #mhgo,
+  then asserts on #mhresults [data-mhsize] texts.
+- Model library (built-in engine): a card per curated on-device model in
+  Settings - size, a plain-English verdict, and an honest fit label
+  ("proven fast here" only after the on-device benchmark says so; otherwise
+  an explicitly-labelled estimate from device memory). Use picks, Load loads,
+  Download fetches weights with live progress and a real Cancel. Downloads
+  are resumable at chunk level: verified chunks persist in a
+  "transformers-partial" cache with truthful Content-Range headers, a
+  cancelled or crashed download resumes from the stored offset without
+  re-fetching a byte, and finished files assemble into the main cache
+  (proved by range-server request log). Test loads + benchmarks (now also
+  reports peak JS heap where the browser exposes it, honest "not
+  measurable" line otherwise), Delete removes the weights from the browser
+  cache (audited). Footer shows real browser storage use.
 - Backup: Export downloads one JSON of everything (keys and cloak originals
   never included). Import shows exactly what the file holds, then offers a
   real choice: Merge (default) adds what is missing and keeps the newer copy
@@ -20,6 +46,18 @@ rail (provider/model/key presence) - tap opens Settings.
   paths report exactly what happened and write to the audit trail.
 
 ## Chat (default view, #view-chat)
+- Permission modes (Observe / Ask / Auto): a 3-segment control in the chat
+  header (#permswitch), active mode always visible. One source of truth
+  (settings.permMode); the legacy autonomy boolean is kept in sync so every
+  existing guard holds. Observe runs nothing - goal steps are held with a
+  sys message and approval settlement is refused; Ask runs only what you
+  explicitly advance, sensitive steps still pause on the Sentinel card;
+  Auto is the standing behavior (routine steps auto-advance, sensitive ones
+  always wait). The Goals-header autonomy checkbox reflects the mode
+  (checked = Auto). Switching modes is audited. Drive via CLI: eval calls
+  setPermMode()/advanceGoal()/decideStep() on synthetic goals and asserts
+  step status transitions.
+
 - Send message: type in #chatinput, press Send (#sendbtn) or Enter. Streams a
   reply token-by-token. Stop button halts mid-stream; partial text is kept.
 - Retry a reply: retry action on the last Muse message - regenerates; the old

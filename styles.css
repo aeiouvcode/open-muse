@@ -228,6 +228,14 @@ aside.rail.open{display:flex;position:fixed;left:0;top:0;bottom:0;width:min(300p
 /* fixed hamburger must never cover the mode bar or a view title */
 #modebar{padding-left:64px}
 .viewhead{padding-left:64px}
+.mhcard{border:1px solid var(--line);border-radius:12px;padding:12px;margin:0 0 10px;background:var(--card,#fff)}
+.mhcard.on{border-color:var(--acc)}
+.mhtitle{font-weight:600;font-size:14px}
+.mhmeta{font-size:12px;color:var(--dim);margin-top:2px}
+.mhstate{font-size:12px;margin-top:6px}
+.mhrow{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.mhfit.good{color:#2e7d32}.mhfit.warn{color:#a3620b}.mhfit.bad{color:#b3331e}
+.btn.sm{padding:6px 12px;font-size:12.5px;min-height:36px}
 /* composer: stay above the keyboard, no iOS focus-zoom, safe-area aware */
 #composer{padding:10px var(--pad) calc(10px + env(safe-area-inset-bottom));gap:8px}
 #composer textarea{font-size:16px;min-height:48px}
@@ -473,7 +481,9 @@ body.agent-busy #mstrip .ms-dot{background:var(--acc2);animation:st-pulse 1.5s v
    single-row modebar and borderless hamburger actually win on <=820px */
 @media (max-width:820px){
 #menubtn{background:transparent;border:none}
-#modebar{flex-wrap:nowrap}
+#modebar{flex-wrap:wrap}
+.permswitch{order:99}
+.permswitch .modebtn{flex:1;padding-left:8px;padding-right:8px}
 }
 
 /* ---------- tactile layer: physical-feeling controls in the calm shell ---------- */
@@ -611,3 +621,6 @@ html[data-theme] select{padding-right:28px;background-image:linear-gradient(45de
 #updatebar[hidden]{display:none}
 #updatebar span{flex:1 1 100%;margin-bottom:2px}
 #updatebar .btn{padding:6px 12px;flex:1}
+
+.mhsearchrow{display:flex;gap:8px;align-items:center}
+.mhsearchrow input{flex:1;min-width:0}

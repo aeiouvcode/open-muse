@@ -15,7 +15,7 @@
 <meta name="apple-mobile-web-app-title" content="Open Muse">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<link rel="stylesheet" href="styles.css?v=202609261200">
+<link rel="stylesheet" href="styles.css?v=202609270540">
 </head>
 <body>
 <button id="menubtn" title="Menu">☰</button>
@@ -66,6 +66,11 @@
           <button class="modebtn on" data-mode="agent">Agent</button>
           <button class="modebtn" data-mode="chat">Chat</button>
           <button class="modebtn" data-mode="coder">Coder</button>
+        </div>
+        <div class="modeswitch permswitch" id="permswitch" title="Permission mode - how much Muse may do on its own. Sensitive actions wait for your approval in every mode.">
+          <button class="modebtn" data-perm="observe" title="Observe - Muse plans and answers, but never acts">Observe</button>
+          <button class="modebtn" data-perm="ask" title="Ask first - nothing runs without your go-ahead">Ask</button>
+          <button class="modebtn" data-perm="autonomous" title="Autonomous - routine steps run on their own; sensitive ones still wait for you">Auto</button>
         </div>
         <span class="modenote" id="modenote">Personal agent</span>
         <span style="flex:1"></span>
@@ -282,6 +287,7 @@
           </div>
           <div id="engineprog" style="margin-top:8px"></div>
           <div id="enginebenchout" style="margin-top:2px"></div>
+          <div id="modelhub"></div>
           <input id="enginecustom" placeholder="or a custom Hugging Face repo - e.g. onnx-community/Qwen3-4B-Instruct-ONNX" autocomplete="off" spellcheck="false" style="margin-top:8px">
           <div class="small" style="font-size:11.5px;color:var(--dim2);margin-top:6px">Runs fully on this device - WebGPU when available, plain WASM otherwise (slower, works everywhere). The first load downloads the weights once from Hugging Face; after that they come from this browser's cache and work offline. Custom repos need a q4 (WASM) or q4f16 (WebGPU) ONNX variant to load. Nothing you type ever leaves this device on this engine.</div></div>
         <div class="field"><label>Personal VM passphrase (optional - encrypts local storage with a key only you hold)</label>
@@ -367,7 +373,7 @@
   <button class="btn" id="updatelater">Later</button>
 </div>
 <div class="toast" id="toast"></div>
-<script src="app.js?v=202609261200"></script>
+<script src="app.js?v=202609270540"></script>
 </body>
 </html>
 
