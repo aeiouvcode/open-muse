@@ -96,3 +96,15 @@ class.
   self-tests pass).
 - Standing: commit + File-publish each passing build BEFORE long gaps;
   treat the File revision id as the recovery key and record it in STATE.md.
+
+## 2026-09-28 - control script --setup silently dropped async setups
+- What: screenshot --setup wrapped code as
+  `(new Function("return ("+code+")"))()` - the call produced the async
+  arrow but never invoked it, so async setups resolved instantly with no
+  effect and no error (sync expressions worked, masking the bug).
+  Caught by a byte-identical screenshot pair (fail-loud hashes), then a
+  DOM-marker diagnostic.
+- Lesson: a harness path that "ran" proves nothing; verify the effect
+  (DOM marker, hash delta) before trusting a green. Fix: invoke the
+  produced function when it is one
+  (`const r=(f)(); await (typeof r==="function" ? r() : r)`).

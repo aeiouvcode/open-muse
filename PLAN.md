@@ -26,11 +26,14 @@
    Pass test: 3 tasks complete with no unauthorized file/network access;
    replay recovers the exact tool sequence from the audit trail.
 3. PII sentinel fixture matrix (fleet move 3 delta).
-   Gap: the broker is one audited chokepoint with 22 tests, but no
-   cross-provider proof that PII never leaks.
-   Move: fixture matrix - same conversation transcript through every
-   provider adapter, sentinel PII values asserted absent outbound.
-   Pass test: every provider fixture passes the sentinel tests.
+   SHIPPED gen 32 (2026-09-27, doc stamp late 09-28): the same canary
+   transcript (name/email/phone/card/ssn/PAN/Aadhaar) driven through every
+   outbound path - gemini, openrouter, tokenharbor, local, nim, edge
+   bridge, builtin engine, and both web-search providers - with Broker.use
+   stubbed to capture, no network. Every row asserts zero sentinel bytes
+   outbound, the name twin present, and replies un-swapped; the builtin
+   engine row asserts nothing leaves at all. Any future cloak bypass turns
+   a self-test row red.
 4. Engine verification on real hardware.
    Gap: the engine's biggest claim is unproven since Sep 23 (sandbox has no
    WebGPU; WASM run inconclusive - see MISTAKES).
@@ -51,12 +54,53 @@
    Pass test: switching modes changes real behavior - Observe never runs a
    Sentinel step, Ask first gates on the approval card, Autonomous runs
    within granted permissions; the header always shows the active mode.
-6. File/image upload into chat.
+6. File/image upload into chat. SHIPPED gen 34 (2026-09-28).
    Gap: no document or vision input; LibreChat has both.
-   Move: attachment picker, text extraction for docs, vision-model path
-   where the provider supports it; cloak applies to extracted text.
-   Pass test: a PDF and a photo each produce a grounded answer; sentinel
-   PII in the document is cloaked before the model call.
+
+   Problem restated: a user with notes, a log, or a photo has to
+   copy-paste (text) or describe by hand (images). Both lose fidelity and
+   both bypass any review of what actually leaves the device.
+
+   Scope decision: text-like files (txt/md/csv/json/log/code) and images
+   (png/jpg/webp/gif). PDF is honestly OUT this cycle: no parser lives in
+   the repo, and a regex "extractor" that silently fails on scans and
+   compressed streams would be fake support. The picker refuses PDFs with
+   plain copy; revisit when a real parser earns its bytes.
+
+   Candidate designs:
+   A. CHOSEN: text files fold into the message text visibly at send time
+      ("Attached notes.txt:" block, capped at 8,000 characters with an
+      honest truncation marker) so cloak, memory, retry, checkpoints and
+      search keep working with zero structural change. Images ride the
+      message as atts[] and become provider multipart content in the one
+      history mapper, only for vision-capable providers. Cloak.out gains
+      multipart handling - today it skips non-string content entirely,
+      which would have made image messages an UNCLOAKED path (real gap,
+      closed here).
+   B. Separate attachment store + references. Rejected: a second store to
+      encrypt/export/wipe for no user-visible gain at this size (Rule 7).
+   C. Vendor a PDF library. Rejected: 400KB+ of dependency for extraction
+      that fails silently on exactly the files users trust it with.
+
+   Vision capability: Gemini always; other providers when the model id
+   matches vision patterns (gpt-4o, claude, gemini, vision, -vl, llava,
+   pixtral, minicpm-v); the on-device engines refuse honestly (text-only
+   here). Refusals are plain copy at send time, never a silent drop;
+   history images under a non-vision provider carry an explicit
+   "not shown to this model" marker.
+
+   Caps: text file <=256KB (8KB folded in), image <=10MB downscaled to
+   <=1024px JPEG (<=900KB data URL), max 4 attachments per message.
+
+   Pass tests (keyless, via control-openmuse.mjs eval on the real page):
+   - attach pipeline folds a sentinel-laden .txt into the message and the
+     outbound body (Broker stub) carries the twin, never the sentinel.
+   - gemini + image message maps to multipart content; after Cloak.out
+     the text part is cloaked (multipart gap proven closed).
+   - local provider + image refuses with plain copy; nothing sent.
+   - .pdf refused with plain copy; no attachment added.
+   - 390px screenshot: paperclip in the composer, image thumb + file chip
+     above it, x removes a chip.
 
 ---
 Reference study: pingdotgg/t3code (T3 Code), designated 2026-09-26 18:47.
