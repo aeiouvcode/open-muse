@@ -84,6 +84,20 @@ rail (provider/model/key presence) - tap opens Settings.
   the coder bar's Checkpoint / session name flow.
 - Welcome/first-run: empty chat shows Muse's intro; it appears only when no
   session has content and no key is set.
+- Coder benchmark (gen 33): "Benchmark" button in the coder bar. 3 real tasks
+  (fix-the-bug, implement-to-spec, behavior-preserving refactor) run in a
+  scoped worker - no DOM; network APIs (fetch/XHR/WebSocket/EventSource/
+  importScripts) and IndexedDB trapped, every blocked attempt counted. Exact-value assertions; PASS needs every assertion green
+  AND zero blocked network attempts. Self-check grades reference solutions
+  (proves the harness, says so on screen); "Run with Muse" needs a connected
+  model and grades Muse's own fenced code block per task. Every step lands in
+  the audit trail (kind coder-bench); "Replay last run" re-executes the
+  recorded attempts and rebuilds the step sequence FROM the audit entries -
+  an exact reproduction says "replay exact", any divergence says MISMATCH
+  with the reason. Status line sits under the resume line in the coder bar;
+  "details" opens the per-task/per-assertion breakdown. Drive via CLI:
+  eval `(async()=>{ const r=await runCoderBench("reference"); return r.overall; })()`
+  and `replayCoderBench()` in the same page session.
 
 ## Goals & plans (#view-goals)
 - New goal: "+ New goal" - Muse drafts a plan of steps; approve to activate.

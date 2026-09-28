@@ -1,5 +1,22 @@
 # MISTAKES - Open Muse. Negative results are assets. Never delete.
 
+- runSandboxed silently dead since introduction (found 2026-09-28, gen 33):
+  the worker template literal contained split("\n") - at app runtime that
+  escape became a REAL newline inside the generated worker source, so every
+  worker died with "Uncaught SyntaxError: Invalid or unexpected token".
+  run_js, custom-tool test-runs and tool-forge sandbox gates all returned
+  that error; the 19 self-tests never covered the worker path, so nothing
+  caught it. Found while building the gen 33 benchmark sandbox (I copied
+  the same pattern, hit the same wall, then proved the pre-existing bug
+  with a one-line eval: runSandboxed("return 1+1") -> the SyntaxError).
+  Fixed both sites (split("\\n") in app.js source). Lessons: (1) code
+  generated inside template literals needs its escapes double-checked at
+  the GENERATED layer, not the source layer; (2) a sandbox that always
+  fails the same way is indistinguishable from a passing one unless a test
+  asserts a REAL computed value - the non-vacuous-tests rule now covers
+  the sandbox itself: gen 33's benchmark self-check asserts "return 1+1"
+  -> "-> 2" equivalents via 7 exact-value assertions through the worker.
+
 - Workspace shell outage (2026-09-26 18:28-18:47): 10 consecutive bash
   calls - including pure reads - interrupted within 30-80ms of starting.
   Unverifiable during the outage whether one agent_message send (18:29,
@@ -16,7 +33,12 @@
 - Cloud-browser File previews (since 2026-09-21): the Instinct File viewer
   iframe fails for every revision in the cloud browser, while the same
   preview is green in local Chrome. Consequence: File previews are QA'd in
-  local Chrome only; flagged to platform via main, still open.
+  local Chrome only; flagged to platform via main, still open. Update 2026-09-28: local Chrome now also shows
+  the viewer's "This file could not load" banner - on BOTH the published
+  gen-32 revision and the fresh gen-33 build, with the app rendering and
+  working below the banner each time. Identical across revisions = viewer
+  shell watchdog issue, not build content. Reported to main with
+  side-by-side screenshots.
 - qa-gen23 harness artifact (2026-09-25 23:37): the suite reported 15/16 -
   the one "failure" was the app's own "model key configured" self-test on a
   fresh profile, which is designed guidance. Proven by probe: fails without
