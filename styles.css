@@ -627,3 +627,16 @@ html[data-theme] select{padding-right:28px;background-image:linear-gradient(45de
 .actrow{display:flex;align-items:center;gap:7px;width:100%;margin:4px 0 2px;padding:6px 9px;font:inherit;font-size:11.5px;color:var(--dim);text-align:left;background:var(--bg2);border:1px solid var(--line);border-radius:9px;cursor:pointer}
 .actrow:hover{border-color:var(--acc);color:var(--txt)}
 .actrow .ar-ic{flex:none;width:12px}
+
+/* attachments (move 6) */
+#atchips{display:flex;flex-wrap:wrap;gap:6px;padding:6px 10px 0}
+.atchip{display:inline-flex;align-items:center;gap:6px;background:var(--panel2,#1c1c22);border:1px solid var(--line,#2a2a33);border-radius:8px;padding:3px 6px;font-size:12px;max-width:100%}
+.atchip-img{width:28px;height:28px;object-fit:cover;border-radius:5px}
+.atchip-name,.atchip-file{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px}
+.atchip-file::before{content:"\1F4C4 "}
+.atchip-x{background:none;border:none;color:var(--dim2,#888);cursor:pointer;font-size:14px;padding:0 2px}
+.atchip-x:hover{color:var(--bad,#e06c6c)}
+.msgatts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.msgatt-img{max-width:220px;max-height:220px;border-radius:8px;display:block}
+.msgatt-file{font-size:12px;background:var(--panel2,#1c1c22);border:1px solid var(--line,#2a2a33);border-radius:6px;padding:2px 8px}
+#attachbtn{flex:none}

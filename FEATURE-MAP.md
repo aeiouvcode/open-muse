@@ -209,6 +209,25 @@ rail (provider/model/key presence) - tap opens Settings.
   first line only, no stack frames, no JSON blobs, plain fallback copy.
   Model-call errors go through friendlyModelError() on top.
 
+## Attachments (composer)
+- Paperclip in the composer attaches text-like files (txt/md/csv/json/log/
+  code, <=250KB) and images (png/jpg/webp/gif, <=10MB). Chips above the
+  composer show pending attachments; x removes one. PDFs and unknown types
+  are refused with plain copy (no real PDF parser in-repo).
+- Text files fold visibly into the message ("Attached name:" block, first
+  8,000 characters, truncation marked); everything downstream (cloak,
+  memory, retry, search) works unchanged.
+- Images ride the message as atts[] and become multipart content in
+  mapHistoryForModel ONLY for vision-capable providers (Gemini always;
+  others by model-id pattern). Under a text-only provider the send is
+  refused with plain copy; history images carry a "not shown to this
+  model" marker - never a silent drop.
+- Cloak.out cloaks text parts inside multipart content (gen 34 fix - array
+  content used to skip cloaking entirely).
+- Drive via CLI: eval attachFiles([new File(...)]) then sendChat();
+  self-test rows "attachments: ..." cover fold+cloak, multipart,
+  refusals, picker kinds.
+
 ## Storage
 - Everything lives in the browser (IndexedDB/localStorage), optionally
   encrypted with the Personal VM passphrase. Keys: session-only by default,

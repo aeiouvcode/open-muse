@@ -101,7 +101,10 @@
         <div id="chatsearchother" hidden></div>
       </div>
       <div id="chatlog"></div>
+      <div id="atchips" hidden></div>
       <div id="composer">
+        <button class="btn iconbtn" id="attachbtn" title="Attach a text file or image" aria-label="Attach a file or image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><path d="M21 12.5l-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.85 1.85 0 0 1-2.6-2.6l7.8-7.8"/></svg></button>
+        <input type="file" id="attachfile" hidden multiple accept=".txt,.md,.markdown,.csv,.json,.log,.js,.ts,.tsx,.py,.html,.css,.xml,.yaml,.yml,.ini,.cfg,.sh,.sql,.rst,image/png,image/jpeg,image/webp,image/gif">
         <textarea id="chatinput" placeholder="Tell Muse what needs to get done..." rows="1"></textarea>
         <button class="btn iconbtn" id="micbtn" hidden title="Dictate - transcription uses this browser's speech service" aria-label="Dictate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
         <button id="stopbtn" hidden title="Stop the reply">Stop</button>
@@ -375,7 +378,7 @@
   <button class="btn" id="updatelater">Later</button>
 </div>
 <div class="toast" id="toast"></div>
-<script src="app.js?v=202609280545"></script>
+<script src="app.js?v=202609281151"></script>
 </body>
 </html>
 

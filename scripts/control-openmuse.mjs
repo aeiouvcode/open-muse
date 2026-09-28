@@ -100,7 +100,7 @@ else if(cmd==='screenshot'){
   try{
     const p = await page390(b);
     await p.goto(BASE,{waitUntil:'networkidle2',timeout:30000});
-    if(setup){ await p.evaluate(async (code)=>{ await (new Function('return ('+code+')'))(); }, setup); await new Promise(r=>setTimeout(r,400)); }
+    if(setup){ await p.evaluate(async (code)=>{ const r=(new Function('return ('+code+')'))(); await (typeof r==='function' ? r() : r); }, setup); await new Promise(r=>setTimeout(r,400)); }
     if(view){ await p.evaluate(v=>switchView(v), view); await new Promise(r=>setTimeout(r,400)); }
     await p.screenshot({ path: file });
     const size = fs.statSync(file).size;

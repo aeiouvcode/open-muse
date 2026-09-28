@@ -436,7 +436,10 @@ function renderChat(){
     if(m.kind==="card") return m.text;   // pre-rendered card html (approval/suggestion cards render live below)
     if(m.kind==="tool"){ const [t,r]=m.text.split("|||"); return `<div class="toolcard"><b>⚙ ${esc(t)}</b><div class="res">${esc(r)}</div></div>`; }
     const cls = (m.role==="user" ? "user" : m.role==="sys" ? "sys" : "muse") + (m.kind==="checkpoint" ? " checkpoint" : "");
-    const body = m.role==="muse" ? mdLite(m.text) : esc(m.text);
+    const body = (m.role==="muse" ? mdLite(m.text) : esc(m.text))
+      + ((m.atts&&m.atts.length) ? '<div class="msgatts">'+m.atts.map(a=> a.kind==="image"
+          ? '<img class="msgatt-img" src="'+a.dataUrl+'" alt="'+esc(a.name||"image")+'">'
+          : '<span class="msgatt-file">'+esc(a.name||"file")+'</span>').join("")+'</div>' : "");
     const br = (mi===lastUserMi && m.attempts && m.attempts.length>1) ? ` <button class="msgbranch" data-mi="${mi}" data-dir="-1" title="Previous reply variant">&lsaquo;</button><span class="branchno">${(m.attempt==null?m.attempts.length-1:m.attempt)+1}/${m.attempts.length}</span><button class="msgbranch" data-mi="${mi}" data-dir="1" title="Next reply variant">&rsaquo;</button>` : "";
     const retry = mi===lastUserMi ? ` <button class="msgretry" data-mi="${mi}" title="Send this again - keeps this reply as a branch you can flip back to">retry</button>${br}` : "";
     return `<div class="msg ${cls}"><div class="body">${body}</div><div class="meta">${fmtT(m.ts)} <button class="msgcopy" data-mi="${mi}" title="Copy message">copy</button>${retry}</div></div>`;
@@ -845,10 +848,24 @@ const Cloak = {
     if(!this.on()) return messages;
     let total=0; const kinds=new Set();
     const t=messages.map(m=>{
-      if(typeof m.content!=="string") return m;
-      const r=this.outText(m.content);
-      total+=r.swaps; r.kinds.forEach(k=>kinds.add(k));
-      return r.swaps ? {...m, content:r.text} : m;
+      if(typeof m.content==="string"){
+        const r=this.outText(m.content);
+        total+=r.swaps; r.kinds.forEach(k=>kinds.add(k));
+        return r.swaps ? {...m, content:r.text} : m;
+      }
+      if(Array.isArray(m.content)){
+        // multipart (text + image parts): cloak every text part; binaries pass through
+        let sw=0;
+        const parts=m.content.map(p=>{
+          if(!p || p.type!=="text" || typeof p.text!=="string") return p;
+          const r=this.outText(p.text);
+          sw+=r.swaps; r.kinds.forEach(k=>kinds.add(k));
+          return r.swaps ? {...p, text:r.text} : p;
+        });
+        total+=sw;
+        return sw ? {...m, content:parts} : m;
+      }
+      return m;
     });
     if(total){
       this.sessionSwaps+=total;
@@ -1328,6 +1345,30 @@ async function chatOnce(messages, json, model){
   return Cloak.back(ch.message.content);
 }
 
+/* ---------------- attachments -> model payload ----------------
+   Images become OpenAI-style multipart content ONLY here, and only when the
+   active provider can actually see them. Under any other provider an image
+   is never silently dropped: the text carries an explicit marker. */
+function visionOK(){
+  const p=provider();
+  if(p.builtin||p.edge) return false;
+  if(p===PROVIDERS.gemini) return true;
+  const m=String(activeModel()||"").toLowerCase();
+  return /gpt-4o|claude|gemini|vision|llava|pixtral|-vl|minicpm-v/.test(m);
+}
+function mapHistoryForModel(chat){
+  const vis=visionOK();
+  return chat.slice(-14).filter(m=>m.role!=="sys"&&!m.kind).map(m=>{
+    const role=m.role==="muse"?"assistant":m.role;
+    const imgs=(m.atts||[]).filter(a=>a.kind==="image"&&a.dataUrl);
+    if(!imgs.length) return {role, content:m.text};
+    if(vis){
+      return {role, content:[{type:"text",text:m.text||""}, ...imgs.map(a=>({type:"image_url", image_url:{url:a.dataUrl}}))]};
+    }
+    return {role, content:(m.text||"")+"\n["+imgs.length+" image"+(imgs.length===1?"":"s")+" attached - not shown to this model]"};
+  });
+}
+
 /* ---------------- AI SDK-shaped protocol ----------------
    All model access goes through this layer, shaped after the Vercel AI SDK:
    a provider exposing generateText/streamText over {role, content} model
@@ -1736,9 +1777,14 @@ const GOAL_RE = /\b(my goal is|goal:|set a goal|new goal|i want to (?:learn|run|
 async function sendChat(auto){
   if(!S()){ showLockScreen("Locked - enter your passphrase to continue."); return; }
   const injected = auto && typeof auto.text==="string";
-  const ta=$("#chatinput"); const text=(injected?auto.text:ta.value).trim().slice(0,4000); if(!text) return;
+  const ta=$("#chatinput"); let text=(injected?auto.text:ta.value).trim().slice(0,4000);
+  const atts=injected?[]:pendingAtts.splice(0); renderAttChips();
+  const fold=foldAttachments(text, atts);
+  if(!fold.text && !fold.imgs.length) return;
+  text=fold.text;
   if(!injected){ ta.value=""; ta.style.height="auto"; const s=S(); if(s&&s.drafts){ delete s.drafts[s.activeConvo]; } }
   await addMsg("user", text);
+  if(fold.imgs.length){ const nm=S().chat[S().chat.length-1]; if(nm&&nm.role==="user"){ nm.atts=fold.imgs; await Store.save(); } }
   if(pendingBranch){
     const nm = S().chat[S().chat.length-1];
     if(nm && nm.role==="user"){ nm.attempts = pendingBranch.attempts; nm.attempt = pendingBranch.attempt; await Store.save(); }
@@ -1789,6 +1835,13 @@ async function sendChat(auto){
     await Store.save(); renderAll(); return;
   }
 
+  // vision honesty: an attached image under a text-only provider gets a
+  // plain answer, never a silent drop
+  if(fold.imgs.length && !visionOK()){
+    await addMsg("muse", "I kept your message but left the image out of the model call - **"+provider().name+"** ("+(activeModel()||"no model chosen")+") can't see images. Switch to Gemini in Settings and ask again, and I'll actually look at it.");
+    await Store.save(); renderAll(); return;
+  }
+
   // goal intent
   if(mode()!=="chat" && GOAL_RE.test(text)){
     const title=text.replace(/^(my goal is to|my goal is|my goal:|goal:|set a goal( to)?|new goal( is)?( to)?)\s*/i,"").trim().replace(/[.!\s]+$/,"").slice(0,140);
@@ -1821,7 +1874,7 @@ async function sendChat(auto){
   const stopBtn=$("#stopbtn");
   if(provider().builtin){ stopBtn.hidden=false; stopBtn.onclick=()=>{ LocalEngine.stop(); stopBtn.hidden=true; }; }
   else if(!provider().edge){ stopBtn.hidden=false; stopBtn.onclick=()=>{ ctl.abort(); stopBtn.hidden=true; }; }
-  const hist=S().chat.slice(-14).filter(m=>m.role!=="sys"&&!m.kind).map(m=>({role:m.role==="muse"?"assistant":m.role, content:m.text}));
+  const hist=mapHistoryForModel(S().chat);
   try{
     const m0 = mode();
     const sys = m0==="coder" ? coderPrompt(await ownSource()) : m0==="chat" ? chatPrompt(text) : systemPrompt(text);
@@ -2864,6 +2917,70 @@ $("#exportchatbtn").onclick=async()=>{
 };
 $("#exportcsv").onclick=async()=>{ downloadText("open-muse-goals.csv","text/csv",goalsCSV()); await audit("goal","Exported goals as CSV"); toast("CSV export downloaded."); };
 
+/* ---------------- attachments (PLAN move 6) ----------------
+   Text-like files fold into the message text visibly; images ride the
+   message as atts[] and become multipart content in mapHistoryForModel.
+   PDFs are refused honestly - no real parser lives in this repo. */
+const ATT_MAX=4, ATT_TEXT_MAX=256*1024, ATT_FOLD=8000, ATT_IMG_MAX=10*1024*1024, ATT_DATAURL_MAX=900*1024*1.4;
+const ATT_TEXT_EXT=/\.(txt|md|markdown|csv|json|log|js|ts|tsx|py|html|css|xml|ya?ml|ini|cfg|sh|sql|rst)$/i;
+let pendingAtts=[];
+function attachKindFor(name, type){
+  if(/^image\/(png|jpe?g|webp|gif)$/.test(type||"")) return "image";
+  if(ATT_TEXT_EXT.test(name||"")) return "file";
+  if(/\.pdf$/i.test(name||"")) return "pdf";
+  return null;
+}
+async function fileToImageAtt(file){
+  if(file.size>ATT_IMG_MAX) throw new Error("too-big");
+  const bmp=await createImageBitmap(file);
+  let {width:w, height:h}=bmp;
+  const scale=Math.min(1, 1024/Math.max(w,h));
+  w=Math.max(1,Math.round(w*scale)); h=Math.max(1,Math.round(h*scale));
+  const cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+  cv.getContext("2d").drawImage(bmp,0,0,w,h);
+  if(bmp.close) bmp.close();
+  let q=0.85, url=cv.toDataURL("image/jpeg",q);
+  while(url.length>ATT_DATAURL_MAX && q>0.45){ q-=0.1; url=cv.toDataURL("image/jpeg",q); }
+  if(url.length>ATT_DATAURL_MAX) throw new Error("too-big");
+  return {kind:"image", name:file.name, dataUrl:url, w, h};
+}
+async function fileToTextAtt(file){
+  if(file.size>ATT_TEXT_MAX) throw new Error("too-big");
+  let text=await file.text(), truncated=false;
+  if(text.length>ATT_FOLD){ text=text.slice(0,ATT_FOLD); truncated=true; }
+  return {kind:"file", name:file.name, text, truncated};
+}
+async function attachFiles(list){
+  const errs=[];
+  for(const file of list){
+    if(pendingAtts.length>=ATT_MAX){ errs.push("Up to "+ATT_MAX+" attachments at a time."); break; }
+    const kind=attachKindFor(file.name, file.type);
+    try{
+      if(kind==="image") pendingAtts.push(await fileToImageAtt(file));
+      else if(kind==="file") pendingAtts.push(await fileToTextAtt(file));
+      else if(kind==="pdf") errs.push(file.name+": PDFs can't be read yet - copy the text out and paste it, or save it as .txt.");
+      else errs.push(file.name+": that file type isn't readable. Text files (txt, md, csv, json, code) and images (png, jpg, webp) work.");
+    }catch(e){
+      errs.push(file.name+(e && e.message==="too-big" ? " is too large - images up to 10MB, text up to 250KB." : " couldn't be read - try another file."));
+    }
+  }
+  renderAttChips();
+  if(errs.length) toast(errs[0]);
+}
+function renderAttChips(){
+  const box=$("#atchips"); if(!box) return;
+  box.innerHTML=pendingAtts.map((a,i)=> a.kind==="image"
+    ? '<span class="atchip"><img class="atchip-img" src="'+a.dataUrl+'" alt=""><span class="atchip-name">'+esc(a.name)+'</span><button class="atchip-x" data-ai="'+i+'" title="Remove">\u00d7</button></span>'
+    : '<span class="atchip"><span class="atchip-file">'+esc(a.name)+'</span><button class="atchip-x" data-ai="'+i+'" title="Remove">\u00d7</button></span>').join("");
+  box.hidden=!pendingAtts.length;
+  $$("#atchips .atchip-x").forEach(b=>b.onclick=()=>{ pendingAtts.splice(+b.dataset.ai,1); renderAttChips(); });
+}
+function foldAttachments(text, atts){
+  const blocks=atts.filter(a=>a.kind==="file").map(a=>"Attached "+a.name+":\n"+a.text+(a.truncated?"\n[truncated - first 8,000 characters attached]":""));
+  const full=[text,...blocks].filter(Boolean).join("\n\n");
+  return { text: full, imgs: atts.filter(a=>a.kind==="image") };
+}
+
 /* composer */
 const ta=$("#chatinput");
 /* drafts: an unfinished message belongs to its chat, survives reloads and
@@ -2886,6 +3003,11 @@ ta.addEventListener("input",()=>{
 });
 ta.addEventListener("keydown",e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); sendChat(); } });
 $("#sendbtn").addEventListener("click", sendChat);
+const attBtn=$("#attachbtn"), attFile=$("#attachfile");
+if(attBtn&&attFile){
+  attBtn.addEventListener("click", ()=>attFile.click());
+  attFile.addEventListener("change", async()=>{ const fs=[...attFile.files]; attFile.value=""; if(fs.length) await attachFiles(fs); });
+}
 
 
 /* ---------------- modes: agent | coder ---------------- */
@@ -3265,6 +3387,48 @@ async function runSelfTests(){
       st.counters.cloakSwaps = saved.swaps;
     }
   }catch(e){ out.push({name:"cloak fixture matrix", pass:false, note:humanError(e)}); }
+  // attachments (PLAN move 6): fold + vision mapping + honest refusals,
+  // same stub-and-capture discipline as the cloak matrix - no network.
+  try{
+    const st=S();
+    const saved={ provider: st.settings.provider, model: st.settings.model,
+      cloak: JSON.parse(JSON.stringify(st.cloak||{on:false,rules:[]})),
+      use: Broker.use, has: Broker.has };
+    try{
+      st.cloak={on:true, rules:[]};
+      const SENT="kanika.rathore@example.net";
+      Cloak.ensure("Kanika Rathore","name");
+      const nameTwin=(Cloak.rules().find(r=>r.real==="Kanika Rathore")||{}).twin||"";
+      // a) text file folds in and cloaks through the real pipeline
+      const fold=foldAttachments("what does this say?", [{kind:"file", name:"notes.txt", text:"Call Kanika Rathore at "+SENT, truncated:false}]);
+      const cloaked=Cloak.out([{role:"user", content:fold.text}])[0].content;
+      const emailTwin=(Cloak.rules().find(r=>r.kind==="email"&&r.real===SENT)||{}).twin||"";
+      out.push({name:"attachments: text folds in + cloaks",
+        pass: fold.text.includes("Attached notes.txt:") && !cloaked.includes(SENT) && !!emailTwin && cloaked.includes(emailTwin) && cloaked.includes(nameTwin) && fold.imgs.length===0});
+      // b) gemini + image maps to multipart; Cloak.out cloaks the text part
+      st.settings.provider="gemini"; st.settings.model="matrix-model";
+      const imgMsg={role:"user", text:"what is this from "+SENT+"?", atts:[{kind:"image", name:"p.png", dataUrl:"data:image/jpeg;base64,AAAA"}]};
+      const mapped=mapHistoryForModel([imgMsg])[0];
+      const mc=Cloak.out([mapped])[0];
+      out.push({name:"attachments: vision multipart + cloak",
+        pass: Array.isArray(mc.content) && mc.content[1] && mc.content[1].type==="image_url" && mc.content[1].image_url.url==="data:image/jpeg;base64,AAAA" && !mc.content[0].text.includes(SENT)});
+      // c) non-vision provider: marker instead of silent drop
+      st.settings.provider="local"; st.settings.model="matrix-model";
+      const mapped2=mapHistoryForModel([imgMsg])[0];
+      out.push({name:"attachments: non-vision marks, never silently drops",
+        pass: typeof mapped2.content==="string" && mapped2.content.includes("not shown to this model") && !visionOK()});
+      st.settings.provider="gemini";
+      out.push({name:"attachments: gemini sees images", pass: visionOK()});
+      // d) honest refusals at the picker
+      out.push({name:"attachments: pdf refused honestly", pass: attachKindFor("report.pdf","application/pdf")==="pdf"});
+      out.push({name:"attachments: unknown type refused", pass: attachKindFor("archive.zip","application/zip")===null});
+      out.push({name:"attachments: text + image kinds recognized", pass: attachKindFor("a.md","text/markdown")==="file" && attachKindFor("b.png","image/png")==="image"});
+      Broker.use=saved.use; Broker.has=saved.has;
+    } finally {
+      st.settings.provider=saved.provider; st.settings.model=saved.model; st.cloak=saved.cloak;
+      Broker.use=saved.use; Broker.has=saved.has;
+    }
+  }catch(e){ out.push({name:"attachments pipeline", pass:false, note:humanError(e)}); }
   return out;
 }
 

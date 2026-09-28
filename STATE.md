@@ -47,7 +47,12 @@
   item-by-item with runnable proof per item.
 
 
-- Local HEAD: gen 33 commit (coder benchmark harness + runSandboxed repair) -
+- Local HEAD: gen 34 commit (attachments - text/image upload, PLAN move 6) -
+  see git log. Gen 34 evidence: 26/26 self-tests via control CLI (7 new
+  attachment rows), end-to-end CLI eval (fold-in + image att + bubble),
+  390px screenshots of chips + sent bubble. Also repaired the control
+  script's --setup flag (async setups never invoked - see MISTAKES).
+- Previous: gen 33 (coder benchmark harness + runSandboxed repair) -
   see git log. Recovered 2026-09-27 17:4x IST from Instinct
   File revision filerevision-01M3GQXXY5E5694EDNKF8S82T0 after the sandbox
   was rebuilt and the unpushed local stack was lost; RULE 5 doctor green
@@ -71,9 +76,9 @@
   screenshot (--setup), wait-settle, interact, eval. Gen 30 proofs: resume
   via range-server request log, search via live HF queries + prefetch's
   tree-walk, peak-memory render both branches.
-- Next steps: ranked in PLAN.md. Moves 1, 5 and 2 shipped. Next: PII
-  sentinel matrix (move 3) or file/image upload (move 6); engine
-  verification needs the owner's phone.
+- Next steps: ranked in PLAN.md. Moves 1, 5, 2, 3 (doc stamp) and 6
+  shipped. Next: engine verification (move 4) needs the owner's phone;
+  PDF support is the known move-6 delta (needs a real parser).
 - Note: this file absorbs the old CURRENT_TASK.md / CHECKPOINT.md (retired
   2026-09-26 for the fleet-standard spine). HANDOFF.md kept for
   cross-session continuity.
