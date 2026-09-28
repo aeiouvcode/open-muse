@@ -120,6 +120,7 @@ const PROVIDERS = {
                  fallback:[] },
 };
 const provider = () => PROVIDERS[S().settings.provider] || PROVIDERS.openrouter;
+const modelAvailable = () => Broker.has("model") || !!provider().local || !!provider().edge || !!provider().nim || !!provider().builtin;
 const activeModel = () => S().settings.model || provider().defModel;
 /* local provider endpoints come from the user-set base URL */
 function provEndpoints(){
@@ -1242,7 +1243,7 @@ function humanError(e, fallback){
 }
 async function chatStream(messages, onTok, signal){
   const prov=provider(); const ep=provEndpoints();
-  if(!Broker.has("model") && !prov.local && !prov.edge && !prov.nim && !prov.builtin) throw new Error("no-key");
+  if(!modelAvailable()) throw new Error("no-key");
   if((prov.local || prov.nim) && !activeModel()) throw new Error("no-model");
   if(prov.builtin){
     // on-device: nothing leaves the browser, so there is nothing to cloak
@@ -1307,7 +1308,7 @@ async function chatStream(messages, onTok, signal){
 }
 async function chatOnce(messages, json, model){
   const prov=provider(); const ep=provEndpoints();
-  if(!Broker.has("model") && !prov.local && !prov.edge && !prov.nim && !prov.builtin) throw new Error("no-key");
+  if(!modelAvailable()) throw new Error("no-key");
   if((prov.local || prov.nim) && !(model || activeModel())) throw new Error("no-model");
   if(prov.builtin){
     const em = model || activeModel() || LocalEngine.loadedModel || "";
@@ -1782,8 +1783,7 @@ async function sendChat(auto){
 
   // honesty gate: without a model key nothing past here can work - say so
   // plainly and point at the fix instead of pretending to answer.
-  const keylessProv = !!provider().local || !!provider().edge || !!provider().nim || !!provider().builtin;
-  if(!Broker.has("model") && !keylessProv){
+  if(!modelAvailable()){
     await addMsg("muse", "I can't answer that yet - there is no model connected, so anything I said would be fake. Paste a **Gemini** key in Settings and everything starts working for real: chat, goals, plans, memory. The key is free and stays in this browser.");
     await addMsg("muse", `<div class="wactions"><button class="wchip" data-wa="settings">Set up a key</button><button class="wchip" data-wa="geminikey">Get a free Gemini key</button></div>`, "card");
     await Store.save(); renderAll(); return;
@@ -2975,6 +2975,16 @@ function renderCoderWorkbench(){
   $("#codersessionname").textContent=x?x.name:"Main";
   $("#codercontextbar").style.width=q.pct+"%"; $("#codercontexttext").textContent=q.pct+"%"; $("#codercontextnote").textContent=q.label;
   $("#coderresume").textContent=(x&&x.checkpoint)||c.lastCheckpoint||"No checkpoint yet. Muse will preserve decisions, changed files and next steps locally.";
+  const bs=$("#coderbenchstatus");
+  if(bs){ const b=c.bench;
+    if(!b){ bs.hidden=true; }
+    else{
+      bs.hidden=false;
+      const n=b.tasks.filter(t=>t.pass).length, net=b.tasks.reduce((s,t)=>s+(t.net||0),0);
+      bs.innerHTML=`<b>${b.source==="model"?"Muse run":"Self-check"} ${b.overall.toUpperCase()}</b><span>${n}/${BENCH_TASKS.length} tasks &middot; ${net} blocked network/storage attempt${net===1?"":"s"} &middot; ${fmtT(b.finished||b.started)}</span>${b.replay?`<span>replay ${b.replay.exact?"exact":"MISMATCH"}</span>`:""}<button class="btn" id="coderbenchdetail">details</button>`;
+      const d=$("#coderbenchdetail"); if(d) d.onclick=showBenchDetail;
+    }
+  }
 }
 async function createCoderCheckpoint(quiet){
   const c=coderState(), x=activeCoderSession(), text=checkpointText(); x.checkpoint=text; c.lastCheckpoint=text; x.updated=nowISO();
@@ -2995,6 +3005,144 @@ function openCoderSessions(){
 }
 $("#coderplan").onclick=async()=>{ const c=coderState(); c.planMode=!c.planMode; await Store.save(); renderCoderWorkbench(); await audit("coder",`Plan mode ${c.planMode?"enabled":"disabled"}`); };
 $("#codersessions").onclick=openCoderSessions;
+
+/* ---------------- coder benchmark (PLAN move 2, gen 33) ----------------
+   Three real coding tasks with exact-value assertions, executed in a
+   scoped worker: no DOM, no page storage, and network APIs trapped -
+   every blocked attempt is counted, so "no network" is an asserted fact.
+   Runs are recorded in the audit trail; replay rebuilds the step sequence
+   from that trail and reproduces every verdict, or says MISMATCH. */
+function lastCodeBlock(text){
+  const re=/```([a-zA-Z]*)\n?([\s\S]*?)```/g; let m, last=null;
+  while((m=re.exec(String(text)))){ if(m[1]!=="diff" && m[1]!=="tool") last={lang:m[1]||"", code:m[2].replace(/\n$/,"")}; }
+  return last;
+}
+const BENCH_TASKS=[
+  { id:"inr-fix", title:"Fix the bug",
+    prompt:"This Indian-digit-grouping formatter is wrong - it groups in 3s like a Western formatter. Fix it: groups of 2 after the last 3 digits, decimals preserved, negatives handled. inr(1234567.89) must be \"12,34,567.89\". Reply with one js code block defining inr.",
+    fixture:"function inr(n){ const s=String(n); const parts=s.split(\".\"); let whole=parts[0]; let out=\"\"; while(whole.length>3){ out=\",\"+whole.slice(-3)+out; whole=whole.slice(0,-3); } out=whole+out; return parts[1]!==undefined ? out+\".\"+parts[1] : out; }",
+    test:'__eq("lakh/crore grouping", inr(1234567.89), "12,34,567.89"); __eq("negative", inr(-95000), "-95,000"); __eq("small stays plain", inr(100), "100");',
+    reference:"function inr(n){ const neg=n<0; const s=String(Math.abs(n)); const w=s.split(\".\"); const last3=w[0].slice(-3); let rest=w[0].slice(0,-3); const g=[]; while(rest.length>0){ g.unshift(rest.slice(-2)); rest=rest.slice(0,-2); } return (neg?\"-\":\"\")+[...g,last3].join(\",\")+(w[1]!==undefined?\".\"+w[1]:\"\"); }" },
+  { id:"debounce", title:"Implement to spec",
+    prompt:"Implement debounce(fn, ms): trailing-edge only, rapid calls within the window collapse into one call with the LAST arguments, and a .cancel() method drops a pending fire. Reply with one js code block defining debounce.",
+    fixture:"",
+    test:'let calls=0, lastArgs=null; const fn=(...a)=>{ calls++; lastArgs=a; }; const d=debounce(fn, 30); d("a"); d("b"); d("c"); await new Promise(r=>setTimeout(r, 90)); __eq("collapsed to one fire", calls, 1); __eq("last args win", JSON.stringify(lastArgs), JSON.stringify(["c"])); d("x"); d.cancel(); await new Promise(r=>setTimeout(r, 90)); __eq("cancel drops pending fire", calls, 1);',
+    reference:"function debounce(fn, ms){ let t=null; const d=(...a)=>{ clearTimeout(t); t=setTimeout(()=>{ t=null; fn(...a); }, ms); }; d.cancel=()=>{ clearTimeout(t); t=null; }; return d; }" },
+  { id:"refactor", title:"Behavior-preserving refactor",
+    prompt:"Rewrite legacyQuote (bill total with discount tiers: >=10000 takes 15% off, >=5000 takes 10%, >=1000 takes 5%, rounded to 2 decimals) as a clean function quote(items) using reduce and a tier table. Behavior must match legacyQuote EXACTLY on every input, including boundaries. Reply with one js code block defining quote.",
+    fixture:"function legacyQuote(items){ let t=0; for(const it of items){ t+=it.price*it.qty; } let disc=0; if(t>=10000){ disc=0.15; } else if(t>=5000){ disc=0.1; } else if(t>=1000){ disc=0.05; } return Math.round((t*(1-disc))*100)/100; }",
+    test:'const cases=[[], [{price:1,qty:1}], [{price:999.99,qty:1}], [{price:1000,qty:1}], [{price:2500,qty:2}], [{price:5000,qty:1}], [{price:4999.99,qty:1}], [{price:10000,qty:1}], [{price:333.33,qty:3},{price:0.01,qty:1}], [{price:0,qty:5}], [{price:7.5,qty:133}], [{price:19999,qty:1},{price:1,qty:1}]]; __deep("12-case matrix matches legacy exactly", cases.map(c=>quote(c)), cases.map(c=>legacyQuote(c)));',
+    reference:"function quote(items){ const t=items.reduce((s,it)=>s+it.price*it.qty, 0); const disc=t>=10000?0.15:t>=5000?0.1:t>=1000?0.05:0; return Math.round(t*(1-disc)*100)/100; }" }
+];
+function benchSandbox(fixture, candidate, test){
+  return new Promise(resolve=>{
+    let worker;
+    try{
+      const wrapped=`let __net=0; const __netLog=[];
+const __trap=k=>{ __net++; __netLog.push(k); throw new Error("network blocked in benchmark sandbox ("+k+")"); };
+const fetch=(...a)=>__trap("fetch");
+const XMLHttpRequest=function(){ __trap("XMLHttpRequest"); };
+const WebSocket=function(){ __trap("WebSocket"); };
+const EventSource=function(){ __trap("EventSource"); };
+const importScripts=(...a)=>__trap("importScripts");
+const indexedDB={open:()=>__trap("indexedDB"), deleteDatabase:()=>__trap("indexedDB")};
+const __t0=Date.now();
+Promise.resolve((async()=>{
+${fixture||""}
+${candidate||""}
+const __asserts=[];
+const __eq=(name,actual,expected)=>{ __asserts.push({name:String(name).slice(0,80), pass:actual===expected, actual:String(actual).slice(0,120), expected:String(expected).slice(0,120)}); };
+const __deep=(name,actual,expected)=>{ const a=JSON.stringify(actual), e=JSON.stringify(expected); __asserts.push({name:String(name).slice(0,80), pass:a===e, actual:a.slice(0,200), expected:e.slice(0,200)}); };
+${test}
+return __asserts;
+})()).then(a=>postMessage({ok:true, net:__net, netLog:__netLog, ms:Date.now()-__t0, asserts:a})).catch(e=>postMessage({ok:false, net:__net, netLog:__netLog, ms:Date.now()-__t0, error:String(e&&e.message||e).split("\\n")[0].slice(0,200)}));`;
+      worker=new Worker(URL.createObjectURL(new Blob([wrapped],{type:"application/javascript"})));
+    }catch(e){ resolve({ok:false, net:0, netLog:[], ms:0, error:"sandbox unavailable: "+String(e).slice(0,80)}); return; }
+    const to=setTimeout(()=>{ worker.terminate(); resolve({ok:false, net:0, netLog:[], ms:5000, error:"killed: 5 second limit"}); }, 5000);
+    worker.onmessage=e=>{ clearTimeout(to); worker.terminate(); resolve(e.data||{ok:false, net:0, netLog:[], ms:0, error:"empty reply from sandbox"}); };
+    worker.onerror=e=>{ clearTimeout(to); worker.terminate(); resolve({ok:false, net:0, netLog:[], ms:0, error:String(e.message||"script error").slice(0,200)}); };
+  });
+}
+function benchAuditSeq(runId){
+  const seq=[];
+  for(const e of S().audit.filter(x=>x.kind==="coder-bench" && String(x.text).includes(runId)).reverse()){
+    const t=e.text;
+    if(t.startsWith("Run "+runId+" started")) seq.push("start:"+(t.includes("Muse answers")?"model":"reference"));
+    else { const m=t.match(/^[\w-]+\/([\w-]+): (PASS|FAIL)/); if(m) seq.push("task:"+m[1]+":"+m[2].toLowerCase()); }
+  }
+  return seq;
+}
+async function runCoderBench(source){
+  const c=coderState();
+  const run={id:uid("bench"), source, started:nowISO(), tasks:[], overall:"fail"};
+  await audit("coder-bench", `Run ${run.id} started (${source==="model"?"Muse answers":"reference self-check"})`);
+  for(const t of BENCH_TASKS){
+    let candidate=t.reference;
+    if(source==="model"){
+      let reply;
+      try{ reply=await chatOnce([{role:"system",content:coderPrompt(await ownSource())},{role:"user",content:t.prompt}], false); }
+      catch(e){ run.tasks.push({id:t.id, pass:false, error:"model call failed: "+humanError(e), ms:0, net:0, asserts:[]}); await audit("coder-bench", `${run.id}/${t.id}: FAIL - model call failed: ${humanError(e)}`); continue; }
+      const blk=lastCodeBlock(reply);
+      if(!blk){ run.tasks.push({id:t.id, pass:false, error:"Muse's reply had no runnable code block", ms:0, net:0, asserts:[]}); await audit("coder-bench", `${run.id}/${t.id}: FAIL - reply had no runnable code block`); continue; }
+      candidate=blk.code;
+      (run.attempts=run.attempts||{})[t.id]=candidate.slice(0,20000);
+    }
+    const r=await benchSandbox(t.fixture, candidate, t.test);
+    const failed=(r.asserts||[]).filter(a=>!a.pass).map(a=>a.name);
+    const pass=!!r.ok && failed.length===0 && (r.asserts||[]).length>0 && r.net===0;
+    run.tasks.push({id:t.id, pass, error:r.ok?null:(r.error||"unknown"), ms:r.ms||0, net:r.net||0, asserts:r.asserts||[]});
+    await audit("coder-bench", `${run.id}/${t.id}: ${pass?"PASS":"FAIL"} - ${(r.asserts||[]).length} assertion${(r.asserts||[]).length===1?"":"s"}${failed.length?", failed: "+failed.join(", "):""}${r.ok?"":", error: "+r.error}, ${r.net||0} blocked network/storage attempt${(r.net||0)===1?"":"s"}, ${r.ms||0}ms`);
+  }
+  const n=run.tasks.filter(t=>t.pass).length;
+  run.overall=n===BENCH_TASKS.length?"pass":n>0?"partial":"fail";
+  run.finished=nowISO();
+  c.bench=run;
+  await audit("coder-bench", `Run ${run.id} ${run.overall.toUpperCase()} - ${n}/${BENCH_TASKS.length} tasks`);
+  await Store.save(); renderCoderWorkbench();
+  return run;
+}
+async function replayCoderBench(){
+  const c=coderState(); const run=c.bench;
+  if(!run){ toast("No benchmark run to replay yet."); return null; }
+  const seq=["start:"+(run.source==="model"?"model":"reference")];
+  let exact=true; const notes=[];
+  for(const t of BENCH_TASKS){
+    const rec=run.tasks.find(x=>x.id===t.id);
+    if(!rec){ exact=false; notes.push(t.id+" missing from the recorded run"); continue; }
+    const candidate=run.source==="model" ? (run.attempts||{})[t.id] : t.reference;
+    if(candidate==null){ exact=false; notes.push(t.id+" attempt code was not recorded"); seq.push("task:"+t.id+":norecord"); continue; }
+    const r=await benchSandbox(t.fixture, candidate, t.test);
+    const failed=(r.asserts||[]).filter(a=>!a.pass).map(a=>a.name);
+    const pass=!!r.ok && failed.length===0 && (r.asserts||[]).length>0 && r.net===0;
+    seq.push("task:"+t.id+":"+(pass?"pass":"fail"));
+    const verdictsSame=!!r.ok && r.asserts.length===rec.asserts.length && r.asserts.every((a,i)=>a.pass===rec.asserts[i].pass);
+    if(pass!==rec.pass || !verdictsSame){ exact=false; notes.push(t.id+": replay verdict differs from the record"); }
+  }
+  const trail=benchAuditSeq(run.id);
+  if(JSON.stringify(seq)!==JSON.stringify(trail)){ exact=false; notes.push(trail.length<seq.length ? "audit trail no longer holds every step of this run" : "step sequence differs from the audit trail"); }
+  const verdict=exact
+    ? `Replay of ${run.id}: exact match - ${seq.length} steps and every assertion verdict reproduced from the audit trail`
+    : `Replay of ${run.id}: MISMATCH - ${notes.join("; ")}`;
+  await audit("coder-bench", verdict);
+  run.replay={ts:nowISO(), exact, notes};
+  await Store.save(); renderCoderWorkbench();
+  return {exact, notes, verdict};
+}
+function showBenchDetail(){
+  const b=coderState().bench; if(!b) return;
+  const rows=b.tasks.map(t=>{
+    const failed=(t.asserts||[]).filter(a=>!a.pass);
+    return `<div class="auline"><span class="k">${esc(t.id)}</span><span>${t.pass?"PASS":"FAIL"}${t.error?" - "+esc(t.error):""}${failed.length?" - failed: "+esc(failed.map(a=>a.name).join(", ")):""} - ${t.net||0} blocked net/storage, ${t.ms||0}ms</span></div>`;
+  }).join("");
+  openModal(`<h3>Benchmark ${esc(b.id)}</h3><div class="sub">${b.source==="model"?"Muse's own answers, graded by the harness.":"Reference solutions through the real harness - proves the harness, not Muse's coding ability."} Overall: <b>${b.overall.toUpperCase()}</b></div>${rows}${b.replay?`<div class="sub" style="margin-top:8px">Replay ${fmtD(b.replay.ts)}: ${b.replay.exact?"exact match - every step and verdict reproduced from the audit trail.":"MISMATCH - "+esc(b.replay.notes.join("; "))}</div>`:""}<div class="row" style="margin-top:10px"><button class="btn modal-cancel">Close</button></div>`);
+}
+$("#coderbenchbtn").onclick=()=>{
+  const c=coderState(), canModel=modelAvailable();
+  openModal(`<h3>Coder benchmark</h3><div class="sub">3 real coding tasks in a scoped sandbox - no DOM, network and storage blocked and counted. Exact-value assertions, every step in the audit trail, replayable.</div><div class="row" style="flex-wrap:wrap"><button class="btn" id="benchself">Self-check</button><button class="btn pri" id="benchmuse" ${canModel?"":"disabled"}>Run with Muse</button>${c.bench?`<button class="btn" id="benchreplay">Replay last run</button>`:""}</div><div class="small" style="margin-top:8px;color:var(--dim)">${canModel?"Run with Muse grades Muse's own answers; Self-check grades reference solutions.":"No model connected, so only Self-check can run - it proves the harness with reference solutions and says nothing about Muse's coding ability."}</div>`);
+  $("#benchself").onclick=async()=>{ closeModal(); toast("Benchmark self-check running..."); const r=await runCoderBench("reference"); toast(`Self-check ${r.overall.toUpperCase()} - ${r.tasks.filter(t=>t.pass).length}/${BENCH_TASKS.length} tasks`); };
+  if(canModel) $("#benchmuse").onclick=async()=>{ closeModal(); setPresence("working"); toast("Muse is attempting the benchmark - 3 tasks, this takes a bit..."); const r=await runCoderBench("model"); setPresence("idle"); toast(`Muse run ${r.overall.toUpperCase()} - ${r.tasks.filter(t=>t.pass).length}/${BENCH_TASKS.length} tasks`); };
+  if(c.bench && $("#benchreplay")) $("#benchreplay").onclick=async()=>{ closeModal(); const r=await replayCoderBench(); if(r) toast(r.exact?"Replay: exact match with the audit trail":"Replay: MISMATCH - see details"); };
+};
 $("#codercheckpoint").onclick=()=>createCoderCheckpoint(false);
 $("#codercompact").onclick=compactCoderContext;
 
@@ -3385,7 +3533,7 @@ function runSandboxed(code, prelude){
     try{
       const wrapped = `${prelude||""}
 const __logs=[]; const console={log:(...a)=>__logs.push(a.map(x=>{try{return typeof x==="object"?JSON.stringify(x):String(x)}catch(e){return String(x)}}).join(" "))};
-Promise.resolve((async()=>{ ${code} })()).then(r=>postMessage({logs:__logs,result:(()=>{try{return typeof r==="object"?JSON.stringify(r):String(r)}catch(e){return String(r)}})()})).catch(e=>postMessage({logs:__logs,error:String(e&&e.message||e).split("\n")[0].slice(0,200)}));`;
+Promise.resolve((async()=>{ ${code} })()).then(r=>postMessage({logs:__logs,result:(()=>{try{return typeof r==="object"?JSON.stringify(r):String(r)}catch(e){return String(r)}})()})).catch(e=>postMessage({logs:__logs,error:String(e&&e.message||e).split("\\n")[0].slice(0,200)}));`;
       worker = new Worker(URL.createObjectURL(new Blob([wrapped],{type:"application/javascript"})));
     }catch(e){ resolve("sandbox unavailable: "+String(e).slice(0,80)); return; }
     const to = setTimeout(()=>{ worker.terminate(); resolve("(killed: 5 second limit)"); }, 5000);

@@ -47,15 +47,18 @@
   item-by-item with runnable proof per item.
 
 
-- Local HEAD: gen 32 commit (Jelly activity row + PAN/Aadhaar cloak
-  patterns) - see git log. Recovered 2026-09-27 17:4x IST from Instinct
+- Local HEAD: gen 33 commit (coder benchmark harness + runSandboxed repair) -
+  see git log. Recovered 2026-09-27 17:4x IST from Instinct
   File revision filerevision-01M3GQXXY5E5694EDNKF8S82T0 after the sandbox
   was rebuilt and the unpushed local stack was lost; RULE 5 doctor green
   (19 self-tests pass) after recovery.
 - Live (Pages): gens 20-31, origin/main 12c7686.
   https://aeiouvcode.github.io/open-muse/
 - Staged locally, held at the gate: gen 32 (Jelly activity row, PAN/Aadhaar
-  cloak patterns).
+  cloak patterns) + gen 33 (coder benchmark harness, PLAN move 2; includes
+  the runSandboxed SyntaxError repair - run_js/tool-forge sandbox worked
+  again after the fix; and the modelAvailable() leanness dedup, 3 duplicate
+  keyless gates -> 1 helper).
 - Gate (owner, Sep 26 17:26 via main, supersedes Sep 25 GO): nothing goes
   live - no public Pages deploy, no public File publish - without his
   explicit yes relayed by main. Commits, QA, push prep, PRIVATE File
@@ -68,8 +71,8 @@
   screenshot (--setup), wait-settle, interact, eval. Gen 30 proofs: resume
   via range-server request log, search via live HF queries + prefetch's
   tree-walk, peak-memory render both branches.
-- Next steps: ranked in PLAN.md. Moves 1 and 5 shipped. Next: coder
-  benchmark harness (move 2) or PII sentinel matrix (move 3); engine
+- Next steps: ranked in PLAN.md. Moves 1, 5 and 2 shipped. Next: PII
+  sentinel matrix (move 3) or file/image upload (move 6); engine
   verification needs the owner's phone.
 - Note: this file absorbs the old CURRENT_TASK.md / CHECKPOINT.md (retired
   2026-09-26 for the fleet-standard spine). HANDOFF.md kept for

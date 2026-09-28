@@ -9,6 +9,17 @@
    delta vs Jan: none blocking - Jan has no resume either; our sizes are
    measured where Jan's are per-model metadata.
 2. Coder 3-task replayable benchmark (fleet move 1 delta).
+   SHIPPED gen 33 (2026-09-28): 3 tasks (fix-the-bug INR grouping,
+   implement-to-spec debounce, behavior-preserving refactor) with 7
+   exact-value assertions; scoped worker traps fetch/XHR/WebSocket/
+   EventSource/importScripts and counts every blocked attempt; PASS
+   requires all assertions green AND zero blocked attempts; runs recorded
+   in the audit trail; Replay re-executes recorded attempts and rebuilds
+   the step sequence FROM the audit entries - exact match proven by CLI
+   eval (bench-6ll6iu1yagd). Cycle also repaired runSandboxed (dead since
+   introduction, same escaping bug) and deduped 3 keyless-gate copies
+   into modelAvailable() (Rule 7). Keyless mode runs an honestly-labelled
+   Self-check only; "Run with Muse" gates on a connected model.
    Gap: coder mode is inspect-only with approvals and audit, but nothing
    proves it completes real tasks; OpenHands publishes exactly that proof.
    Move: 3 real coding tasks, scoped sandbox execution, replayable audit.
@@ -135,3 +146,67 @@ step stays todo with an Observe message (never reaches approval or run);
 ask+sensitive lands on the approval card; autonomous+sensitive also lands
 on the approval card; observe+routine stays todo; header control and the
 Goals checkbox reflect each switch; autonomy syncs.
+
+---
+# Gen 33 design log (RULE 6, 2026-09-28 05:45) - Coder benchmark = PLAN move 2
+
+Problem restated: coder mode plans, drafts diffs and routes them through
+Evolve gates, but nothing proves the loop completes real coding work.
+OpenHands' whole claim rests on published benchmark numbers; ours rests
+on nothing. The gap is not model quality (that needs the owner's key and
+hardware) - it is that the app has no harness in which a coding attempt is
+executed in a scoped sandbox, graded against exact-value assertions, and
+recorded so the run can be replayed step-for-step from the audit trail.
+
+What "real" means here (non-vacuous tests rule): three tasks with exact
+assertions, not "didn't crash":
+1. fix-the-bug: broken Indian-digit-grouping formatter (inr). Assertions:
+   inr(1234567.89) is exactly "12,34,567.89", inr(-95000) is "-95,000",
+   inr(100) is "100".
+2. implement-to-spec: debounce(fn, ms) with trailing fire + .cancel().
+   Assertions: 3 calls inside the window fire fn exactly once with the
+   last args; after .cancel() nothing fires. Real timers, exact counts.
+3. behavior-preserving refactor: candidate quote(items) must match a
+   legacy bill calculator's outputs on a fixed 12-case matrix including
+   tier boundaries and an empty cart. Deep-equal, exact.
+
+Candidate designs:
+A. Benchmark runner beside runSandboxed with a structured-result worker:
+   prelude traps fetch/XMLHttpRequest/WebSocket/EventSource/importScripts
+   (each trap counts and throws), runs fixture + candidate + assertions,
+   postMessages a structured verdict. CHOSEN: workers already have no DOM
+   or page storage; the trap makes "no network access" a counted,
+   asserted fact instead of an assumption. runSandboxed itself is left
+   untouched (its string contract serves chat tools; a shared edit would
+   risk every caller for one new caller - anti-lean).
+B. In-browser virtual repo where coder mode applies patches to a fake FS
+   and runs a test suite. Rejected for this cycle: closest to OpenHands
+   but triples the surface (patch parser, FS, differ) before the simpler
+   claim - execute, grade, record, replay - is proven. Rule 7.
+C. Extend the CLI eval only, no in-app feature. Rejected: the gap is
+   user-visible proof; the CLI remains the verification path (RULE 5),
+   not the product.
+
+Run record + replay: S().coder.bench stores run id, source
+("reference" | "model"), per-task verdicts (assertions, ms, blocked
+network attempts) and the attempt code (model runs only, capped 20KB).
+Every step also lands in the audit trail (kind "coder-bench"). Replay
+re-executes the recorded attempts and asserts the step sequence and every
+assertion verdict reproduce exactly - the audit trail is the source of
+the sequence, so a tampered or lost trail shows as a replay mismatch,
+not a silent pass.
+
+Honesty boundary: with no model key the only runnable mode is "Self-check"
+- reference solutions graded by the real harness. It proves the harness,
+never the model, and the UI says exactly that. "Run with Muse" needs a
+model key in coder mode, extracts the last fenced code block from the
+reply (new 8-line helper; mdLite's regex is render-only and not reusable),
+and grades that. A keyless canned reply would be a betrayal; a labelled
+fixture is not.
+
+Pass tests (keyless, via control-openmuse.mjs eval on the real page):
+self-check run grades all 3 tasks PASS with 0 blocked network attempts;
+a deliberately network-reaching candidate is blocked and counted; replay
+of the recorded run reports an exact sequence+verdict match; a wrong
+candidate (returns garbage) FAILS with named failed assertions; results
+render in the coder bench with an honest overall label.
