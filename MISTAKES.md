@@ -108,3 +108,6 @@ class.
   (DOM marker, hash delta) before trusting a green. Fix: invoke the
   produced function when it is one
   (`const r=(f)(); await (typeof r==="function" ? r() : r)`).
+
+## 2026-09-28 - File port: render into #root, not document.body
+The hosted-File bootloader (index.html wrapper) waits up to 30s for children inside #root (waitForContent), then posts load-failed to the viewer, which shows "This file could not load" over a perfectly healthy app. The port's App.tsx did document.body.innerHTML = BODY, wiping #root (and the wrapper's script tags) - so every File build showed a false error banner while the app actually ran. The app JS was never dead; the banner was a handshake failure, not an app failure. Fix: render BODY into #root when present. Diagnosis path that worked: iframe resource timing (transferSize 0 = cache, not failure) + reading the wrapper's inline script for the handshake + a live DataTransfer attachment test proving interactivity. Lesson: verify the EFFECT (chip render), not the proxy (script tags in DOM).
