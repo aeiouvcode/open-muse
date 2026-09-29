@@ -274,11 +274,13 @@
           <input type="checkbox" id="setsavekey" style="width:auto">
           <label for="setsavekey" style="margin:0;display:inline;font-size:13px">Remember key on this device (kept inside your Personal VM - encrypted when a passphrase is set)</label></div>
         <div class="field"><label>Model</label>
-          <div style="display:flex;gap:8px">
-            <input id="modelfilter" placeholder="filter models..." style="width:104px;flex:none" title="Narrow the model list">
-            <select id="setmodel" style="flex:1"></select>
-            <button class="btn" id="refreshmodels" title="Reload the provider catalog">↻</button>
-            <button class="btn" id="testmodels" title="Probe every listed model with a one-token reply">Test</button>
+          <div>
+            <select id="setmodel" style="width:100%"></select>
+            <div style="display:flex;gap:8px;margin-top:6px">
+              <input id="modelfilter" placeholder="filter models..." style="flex:1" title="Narrow the model list">
+              <button class="btn" id="refreshmodels" title="Reload the provider catalog">↻</button>
+              <button class="btn" id="testmodels" title="Probe every listed model with a one-token reply">Test</button>
+            </div>
           </div>
           <div class="small" id="modelhint" style="font-size:11.5px;color:var(--dim2);margin-top:4px"></div>
           <input id="setmodelcustom" placeholder="or type a model id - e.g. llama3.1:8b" autocomplete="off" spellcheck="false" style="margin-top:6px" hidden>

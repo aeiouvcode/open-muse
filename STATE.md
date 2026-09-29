@@ -97,3 +97,17 @@
   selector removed (.cb-contextnote residue); negative result recorded
   in PLAN.md. Next: design-led improvement (owner steering), engine
   verification move 4 (needs owner's phone), or PDF support (move-6 delta).
+
+---
+# Gen 38 state (2026-09-29 23:50 IST)
+- Settings model picker 390px redesign SHIPPED: two-row stack (select
+  full width; filter + refresh + Test below). "gemini-3.8-" truncated
+  -> "gemini-3.8-flash" fully visible. Zero behavior change (same ids,
+  markup reorder only). Doctor 7/7 PASS, 26 self-tests green.
+- PRIVATE File file-01M326APAT2KA6SM3C2HG5XAEB generation 37, revision
+  filerevision-01M3Q64FTCW9565RMM0RBSYBQ8. Preview exercised in-browser
+  (select 565px full width, filter own row) before publish.
+- Waterballoon critic: 9/10 round 1 (deductions in PLAN.md). Go-live
+  gate CLOSED: local commits + PRIVATE File only.
+- Next: design-led cycle, engine verification move 4 (owner's phone),
+  PDF support (move-6 delta).
