@@ -416,3 +416,37 @@ Pass tests (keyless, via control-openmuse.mjs eval + screenshots):
 - 390px screenshots: goals view before/after; habits + memory views
   re-shot to prove no regression from shared CSS (.trow/.btn untouched,
   ghost is additive).
+
+---
+# Gen 38 cycle - Settings model picker 390px redesign (design-led, 2026-09-29)
+
+Problem restated: on a 390px phone the Settings Model row crams four
+controls into one flex line - filter input (fixed 104px), model select
+(flex:1), refresh button, Test button. The select, the one control that
+carries the actual choice, is left ~120px and truncates every model id
+("gemini-3.8-..."), so the owner picks blind. This is the primary
+setup path; a setup control that hides its own value fails
+works-out-of-the-box.
+
+Designs considered:
+A. Two-row stack - row 1: select full width; row 2: filter (grows) +
+   refresh + Test. Keeps every control, gives the choice full width,
+   matches the app's single-column rhythm.
+B. Filter above as a search field, refresh + Test beside the select.
+   Still truncates the select (~230px max) - rejected.
+C. Icon-only buttons in one row. Saves ~40px, still truncates, and
+   "Test" as an icon is ambiguous - rejected.
+Pick: A. Zero behavior change - same element ids, same handlers, markup
+reorder only.
+
+Named-competitor pass: Jan gives the model name a full-width dropdown
+with settings gear separate; LibreChat stacks the model selector above
+endpoint options. Both give the chosen model full width on a phone;
+a truncated select is the anti-pattern both avoid.
+
+Cybersecurity pass: markup reorder only - no new inputs, no innerHTML,
+no handler or id changes, no new network or storage surface.
+
+Pass test: at 390px the select spans the full content width and shows
+complete model ids; filter, refresh, Test keep working (same ids);
+doctor 7/7 + 26 self-tests green; before/after screenshots.
