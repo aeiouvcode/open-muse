@@ -70,7 +70,7 @@
   live - no public Pages deploy, no public File publish - without his
   explicit yes relayed by main. Commits, QA, push prep, PRIVATE File
   publishes are expected.
-- Instinct File (PRIVATE): current at gen 35 (gen 37 publishing this run).
+- Instinct File (PRIVATE): current at gen 37 (File generation 36, revision filerevision-01M3PHV4SCSVP9GS361SNATKKJ).
   https://files.instinct.com/file-01M326APAT2KA6SM3C2HG5XAEB
 - Midnight wake (00:30 IST): push-prep only - inventories the staged diff,
   re-verifies QA locally, reports readiness. No push.
