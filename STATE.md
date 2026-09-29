@@ -91,5 +91,7 @@
   via stubbed-AI fixture (22 events both runs, scope-denied path intact).
   Doctor 7/7 PASS, 26 self-tests green. 390px layouts unchanged.
 - Waterballoon critic: 8/10 (gate passed). Full passes in PLAN.md.
-- Next cycle candidates: line-count leanness via real deletion (dead
-  code hunt), or engine verification move 4 (still needs owner's phone).
+- Gen 36: dead-code hunt run - 0 dead functions of 282, 1 dead CSS
+  selector removed (.cb-contextnote residue); negative result recorded
+  in PLAN.md. Next: design-led improvement (owner steering), engine
+  verification move 4 (needs owner's phone), or PDF support (move-6 delta).

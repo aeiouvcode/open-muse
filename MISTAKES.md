@@ -121,3 +121,8 @@ and reverted. Rule going forward: a leanness estimate = lines_deleted -
 (lines_added_at_call_sites + helper_scaffolding). If the honest arithmetic
 is ~0, say so in the design log BEFORE implementing, and grade the cycle
 on structure, not bytes.
+
+11. Static dead-class analysis flagged .mdh1-.mdh4 as dead - they are
+    built by string concatenation ('mdh'+headingLevel) in the markdown
+    renderer. Lesson: before deleting any class, grep for its PREFIX as
+    a concatenation source; token search alone gives false corpses.
