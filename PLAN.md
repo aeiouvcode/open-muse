@@ -254,3 +254,165 @@ a deliberately network-reaching candidate is blocked and counted; replay
 of the recorded run reports an exact sequence+verdict match; a wrong
 candidate (returns garbage) FAILS with named failed assertions; results
 render in the coder bench with an honest overall label.
+
+---
+# Gen 35 design log (RULE 6, 2026-09-28 23:45) - Rule 7 leanness: orchestration-path consolidation
+
+Problem restated: Rule 7 asks for a redundancy hunt with before/after
+numbers. Hunt results (2026-09-28, app.js 4,948 lines): zero dead
+functions (the __eq/__deep/__trap single-mentions are eval-string test
+helpers, alive by design); zero repeated 4-line blocks beyond two 2x
+micro-dups; the one real find is STRUCTURAL: runTeam (classic, 81 lines)
+and runWorkforce (110 lines) are two parallel multi-agent orchestration
+paths with identical skeletons - spawn loop with tool-call handling,
+merge block, all-failed merge, addMsg+audit+counters+setRT tail,
+try/catch with sys message + error audit, TEAM cleanup x2. Convergent
+evolution left the same machine written twice.
+
+Hunt evidence (negative results are assets): dead-function scan clean;
+identifier-insensitive 5-line block scan found 18 groups, all either
+consecutive registrations (cloak patterns, not extractable), micro-dups
+(chatSearch cur-marking 2x, settings-save 2x), or the Team/Workforce
+pair above.
+
+Scope decision: consolidate the SHARED SKELETON only. What stays
+deliberately distinct (parameterized, never unified): role-prompt source
+(AgentRoles vs rolePrompt), tool policy (researcher-only vs scope-denied
+audit path - Workforce's denial path is a real behavior, not dup), and
+all user-visible copy ("Team merge"/"orchestrator" vs "Workforce
+merge"/"coordinator"). This is a behavior-preserving refactor, not a
+feature merge; both front-ends stay live and byte-identical in output.
+
+Candidate designs:
+A. CHOSEN: extract agentMerge(g, ok, {noun, mergeSys, auditKind}),
+   agentAllFailed(err, noun), teamFail(g, e, noun), teamCleanup() as
+   shared helpers; both run paths call them with their own copy/policy
+   arguments. Plus the two micro-dups: chatSearchShowCur(hits) helper,
+   saveSettingKey(inputId, settingsKey, auditLabel) helper.
+B. Fold Team into Workforce with a compat shim. Rejected: Workforce's
+   tool policy is stricter; a shim hides a real semantic difference and
+   risks silently downgrading Team behavior.
+C. Leave it; 1% is below the noise floor. Rejected: Rule 7 is the
+   owner's explicit cycle ask, and the twin paths are the top future-bug
+   farm (fix one, forget the other).
+
+Before numbers (to be re-measured after): app.js 4,948 lines; runTeam 81
+(4323-4403), runWorkforce 110 (4404-4513); duplicated skeleton est.
+~45-55 lines; micro-dups ~12 lines. Target: net -55 to -65 lines, zero
+behavior change.
+
+Pass tests (keyless, via control-openmuse.mjs eval; behavior-preserving
+proof, not just "it runs"):
+- Pre-change fixture: synthetic team goal + workforce goal run with a
+  stubbed ai.generateText; record the exact audit sequence, addMsg
+  labels, and counter deltas. Post-change run of the same fixture must
+  produce byte-identical sequences (non-vacuous: fixture asserts >=6
+  distinct audit/message events per path).
+- Workforce scope-denied path still emits its denial audit line and the
+  "tools are off" user copy (guards against accidental unification).
+- Keyless gate: both paths refuse with the same honest copy as before.
+- 390px screenshot: team launch buttons + workforce view unchanged.
+
+---
+# Gen 35 outcome log (2026-09-29 05:50) - Rule 7 leanness: SHIPPED net 0, honest miss on the line target
+
+What shipped: the Team/Workforce shared skeleton is now ONE machine.
+agentMerge (all-failed copy + merge head parameterized), agentFinish
+(merge post + audit + counter + last-step), teamFail, teamCleanup,
+chatSearchShowCur, saveSettingKey. Call sites keep their own copy, role
+prompts, and tool policy. Workforce's scope-denied path is untouched and
+fixture-proven.
+
+Before/after numbers (the honest part): app.js 4,948 -> 4,948 lines.
+Target was net -55 to -65. The estimate assumed helper scaffolding was
+free; it costs ~30 lines against ~40 saved, and the micro-dups nearly
+break even. An extra extraction (teamGoal) made it WORSE (+3) and was
+reverted on measurement. Result: zero net lines, one skeleton instead of
+two. The win is maintenance (fix one path, not two), not byte count.
+
+Proof of behavior preservation (RULE 5, via control-openmuse.mjs eval):
+stubbed-AI fixture ran team mode, workforce mode, and both no-key
+failure gates pre- and post-change. Event streams (audit kinds+text,
+addMsg roles+text, counter deltas, Store.save calls) are BYTE-IDENTICAL:
+22 distinct events both runs, including "Denied 1 tool call from coder"
+(scope policy intact) and both friendlyModelError fail gates. Doctor:
+7/7 PASS, 26 self-tests green. 390px screenshots (goals, workforce):
+layouts unchanged.
+
+Self-critique: the line target missed and I ship it anyway - the
+alternative was leaving a known twin-machine bug farm in place because
+the estimate was wrong. PARTIAL on the metric, PASS on the structure.
+Cybersecurity pass: no new inputs, no new network surface, tool policy
+bit-identical (fixture-proven), no secrets touched. PASS.
+Competitor pass (Eigent/CAMEL, our workforce inspiration): they run ONE
+orchestration engine with pluggable policies; this cycle moves us the
+same direction. Remaining honest gap: spawn loops still differ
+(parallel map vs dependency waves) - deliberately, that IS the feature
+difference.
+Waterballoon critic gate: 8/10. Deductions: headline metric missed
+(-1.5); a skeptic can call a net-zero cycle cosmetic (-0.5). Held at 8
+because the behavior proof is byte-level, the negative result is
+recorded with numbers, and the structural debt is actually gone.
+
+---
+# Gen 36 audit + micro-deletion (2026-09-29 ~12:00 IST) - dead-code hunt: honest near-zero yield
+
+Problem restatement (RULE 6): after gen 35's net-0 consolidation, is there
+REAL dead weight to delete, provable by behavior-preserving removal?
+
+Method + numbers: static reference analysis over all 282 defined
+function/const identifiers in app.js - every one has a live call site
+(TRUE DEAD: 0). CSS audit over 215 used classes: 2 candidates, of which
+.mdh1-.mdh4 are FALSE POSITIVES (generated by concatenation 'mdh'+level
+in the markdown renderer - see MISTAKES.md). One true dead selector
+found: .cb-contextnote{display:none} inside the 700px media query - no
+base rule, no markup carries the class (coderbench context-note residue
+from an earlier layout). Deleted. Yield: -1 selector, ~27 bytes, 0 lines.
+
+Negative result recorded as an asset: the leanness target is NOT met by
+deletion; the codebase's function surface is fully live. Next leanness
+moves must come from structural simplification, not corpse removal.
+
+Proof (RULE 5, control-openmuse.mjs doctor): 7/7 PASS, 26 self-tests
+green post-deletion. Layouts untouched (selector had no matching nodes
+by construction).
+
+Next cycle candidates (ranked):
+1. Design-led improvement per owner steering (pick one visible surface
+   and deepen it - critic gate grades from 390px evidence).
+2. Engine verification (move 4) - still blocked on the owner's phone.
+3. PDF support (move-6 delta) - needs a real parser decision.
+
+---
+# Gen 37 design log (RULE 6, 2026-09-29 17:50) - Goals & plans 390px action-row redesign
+
+Problem restated: the Goals & plans viewhead at 390px wraps its four
+controls (Autonomous checkbox, Export Markdown, Export CSV, + New goal)
+into a ragged two-row scatter next to a full-width subtitle - the primary
+action (+ New goal) lands mid-row-2 with no visual priority, and the two
+export buttons carry the same weight as the primary. In the taskbox, the
+"Add a task" input clips its own placeholder ("Muse tracks it t...") at
+390px. Fresh 390px evidence: /tmp/om-goals.png (pre-change).
+
+Candidate designs:
+A. CHOSEN: a standard full-width .viewactions row inside the viewhead,
+   below title+sub: [+ New goal] primary first, Autonomous checkbox next,
+   spacer, then Export Markdown / Export CSV demoted to small ghost
+   buttons. Placeholder shortened to "Add a task..." so nothing clips;
+   the existing muted line under the row keeps the full explanation.
+   Zero behavior change - same ids, same handlers, same sync logic.
+B. Overflow "..." menu for the exports. Rejected: hides a discoverable,
+   harmless action behind chrome; more JS for no gain (Rule 7).
+C. Move exports into the empty-state card. Rejected: controls vanish
+   once a goal exists; position depends on data state.
+
+Pass tests (keyless, via control-openmuse.mjs eval + screenshots):
+- goals viewhead contains .viewactions with newgoalbtn as its first
+  button; newgoalbtn's top is below the subtitle's bottom (row order).
+- newtask placeholder rendered width (canvas measureText at computed
+  font) fits inside input.clientWidth at 390px.
+- autonomycb still reflects permMode after a mode switch (existing 26
+  self-tests stay green; no handler touched).
+- 390px screenshots: goals view before/after; habits + memory views
+  re-shot to prove no regression from shared CSS (.trow/.btn untouched,
+  ghost is additive).

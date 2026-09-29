@@ -675,6 +675,9 @@ function applyChatSearch(keepCur){
   $("#chatsearchcount").textContent = q ? (hits.length? String(hits.length) : "0") : "";
   if(!hits.length){ chatSearchCur=-1; return; }
   chatSearchCur = keepCur ? Math.min(Math.max(chatSearchCur,0), hits.length-1) : hits.length-1;
+  chatSearchShowCur(hits);
+}
+function chatSearchShowCur(hits){
   const cur = hits[chatSearchCur];
   cur.classList.add("cur");
   cur.scrollIntoView({block:"center", behavior:"smooth"});
@@ -684,10 +687,7 @@ function chatSearchStep(d){
   const hits = chatSearchHits(); if(!hits.length) return;
   chatSearchCur = ((chatSearchCur + d) % hits.length + hits.length) % hits.length;
   $$("#chatlog .msg.cur").forEach(el=>el.classList.remove("cur"));
-  const cur = hits[chatSearchCur];
-  cur.classList.add("cur");
-  cur.scrollIntoView({block:"center", behavior:"smooth"});
-  $("#chatsearchcount").textContent = (chatSearchCur+1)+"/"+hits.length;
+  chatSearchShowCur(hits);
 }
 function chatSearchClose(){
   $("#chatsearchbar").hidden = true;
@@ -3608,23 +3608,21 @@ $("#diff2prop").addEventListener("click", proposalFromChat);
 $("#addtaskbtn").addEventListener("click", async()=>{ const v=$("#newtask").value.trim(); if(!v) return; $("#newtask").value=""; await addTask(v); });
 $("#newtask").addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); $("#addtaskbtn").click(); } });
 
+async function saveSettingKey(inputSel, settingsKey, auditLabel){
+  const k = $(inputSel).value.trim().slice(0,200);
+  if(k) S().settings[settingsKey] = k;
+  $(inputSel).value = "";
+  await Store.save(); renderTools();
+  await audit("settings", auditLabel);
+  toast("Saved.");
+}
 /* tools view wiring */
 $("#savesearch").addEventListener("click", async()=>{
   S().settings.searchProvider = $("#searchpv").value;
-  const k = $("#searchkey").value.trim().slice(0,200);
-  if(k) S().settings.searchKey = k;
-  $("#searchkey").value = "";
-  await Store.save(); renderTools();
-  await audit("settings","Search settings saved");
-  toast("Saved.");
+  await saveSettingKey("#searchkey","searchKey","Search settings saved");
 });
 $("#savemonid").addEventListener("click", async()=>{
-  const k = $("#monidkey").value.trim().slice(0,200);
-  if(k) S().settings.monidKey = k;
-  $("#monidkey").value = "";
-  await Store.save(); renderTools();
-  await audit("settings","Monid key saved");
-  toast("Saved.");
+  await saveSettingKey("#monidkey","monidKey","Monid key saved");
 });
 $("#opennet").addEventListener("change", async()=>{
   S().settings.openNetwork = $("#opennet").checked;
@@ -4320,6 +4318,38 @@ function resolveRole(role){
   return "researcher";
 }
 const TEAM = {active:false, mode:"", goal:"", agents:[]};
+/* ---- shared multi-agent run helpers (gen 35, Rule 7 leanness) ----
+   One skeleton for Team and Workforce; role-prompt source, tool policy
+   (Workforce's scope-denied path), and all copy stay at the call sites. */
+async function agentMerge(ai, g, ok, {allCopy, mergeSys, withSteering}){
+  if(!ok.length){
+    const firstErr=(TEAM.agents.find(x=>x.status==="failed"&&x.output)||{}).output||"";
+    return allCopy + friendlyModelError(firstErr || "unknown");
+  }
+  const head = withSteering
+    ? `Goal: ${g.title}\n${g.note?`Steering: ${g.note}\n`:""}${g.due?`Due: ${g.due}\n`:""}\n`
+    : `Goal: ${g.title}\n`;
+  return teamCall(()=>ai.generateText({messages:[
+    {role:"system",content:mergeSys},
+    {role:"user",content:head+ok.map(x=>`[${x.role} - ${x.task}]\n${x.output}`).join("\n\n---\n\n")}
+  ]}));
+}
+async function teamFail(g, e, noun){
+  await addMsg("sys", noun+" run failed. " + friendlyModelError(e));
+  await audit("error", `${noun} run failed on "${g.title}": ${String(e.message||e).slice(0,120)}`);
+}
+async function agentFinish(s, g, ok, merged, {noun, unit, auditKind}){
+  await addMsg("muse", `${noun} merge on \u201c${g.title}\u201d (${ok.length}/${TEAM.agents.length} ${unit} delivered):\n\n${merged}`);
+  await audit(auditKind, `${noun} finished on "${g.title}" (${ok.length}/${TEAM.agents.length} ok)`);
+  s.counters.actions++;
+  setRT({last:noun+" finished: "+g.title.slice(0,50)});
+}
+async function teamCleanup(){
+  TEAM.active=false; TEAM.agents=[];
+  setRT({state:"idle", step:"", tool:""});
+  await Store.save(); renderAll();
+}
+
 async function runTeam(goalId, mode){
   if(mode==="workforce") return runWorkforce(goalId);
   const s=S(); const g=s.goals.find(x=>x.id===goalId); if(!g) return;
@@ -4369,28 +4399,13 @@ async function runTeam(goalId, mode){
       renderStatus();
     }));
     const ok = TEAM.agents.filter(x=>x.status==="done");
-    let merged;
-    if(!ok.length){
-      const firstErr=(TEAM.agents.find(x=>x.status==="failed"&&x.output)||{}).output||"";
-      merged="Every agent failed. " + friendlyModelError(firstErr || "unknown");
-    }
-    else{
-      merged = await teamCall(()=>ai.generateText({messages:[
-        {role:"system",content:"You are the orchestrator. Merge your agent team's work into one coherent deliverable: keep what survives scrutiny, drop what does not. End with one line naming what you merged."},
-        {role:"user",content:`Goal: ${g.title}\n${g.note?`Steering: ${g.note}\n`:""}${g.due?`Due: ${g.due}\n`:""}\n`+ok.map(x=>`[${x.role} - ${x.task}]\n${x.output}`).join("\n\n---\n\n")}
-      ]}));
-    }
-    await addMsg("muse", `Team merge on \u201c${g.title}\u201d (${ok.length}/${TEAM.agents.length} agents delivered):\n\n${merged}`);
-    await audit("team", `Team finished on "${g.title}" (${ok.length}/${TEAM.agents.length} ok)`);
-    s.counters.actions++;
-    setRT({last:"Team finished: "+g.title.slice(0,50)});
+    const merged = await agentMerge(ai, g, ok, {allCopy:"Every agent failed. ", withSteering:true,
+      mergeSys:"You are the orchestrator. Merge your agent team's work into one coherent deliverable: keep what survives scrutiny, drop what does not. End with one line naming what you merged."});
+    await agentFinish(s, g, ok, merged, {noun:"Team", unit:"agents", auditKind:"team"});
   }catch(e){
-    await addMsg("sys", "Team run failed. " + friendlyModelError(e));
-    await audit("error", `Team run failed on "${g.title}": ${String(e.message||e).slice(0,120)}`);
+    await teamFail(g, e, "Team");
   }
-  TEAM.active=false; TEAM.agents=[];
-  setRT({state:"idle", step:"", tool:""});
-  await Store.save(); renderAll();
+  await teamCleanup();
 }
 
 /* ---------------- workforce: dependency-graph multi-agent runs ----------------
@@ -4480,28 +4495,13 @@ async function runWorkforce(goalId){
       }));
     }
     const ok=TEAM.agents.filter(x=>x.status==="done");
-    let merged;
-    if(!ok.length){
-      const firstErr=(TEAM.agents.find(x=>x.status==="failed"&&x.output)||{}).output||"";
-      merged="Every workforce agent failed. " + friendlyModelError(firstErr || "unknown");
-    }
-    else{
-      merged=await teamCall(()=>ai.generateText({messages:[
-        {role:"system",content:"You are the coordinator. Merge your workforce's deliverables into one coherent final answer: keep what survives scrutiny, resolve conflicts, drop what failed. End with one line naming what you merged."},
-        {role:"user",content:`Goal: ${g.title}\n`+ok.map(x=>`[${x.role} - ${x.task}]\n${x.output}`).join("\n\n---\n\n")}
-      ]}));
-    }
-    await addMsg("muse", `Workforce merge on \u201c${g.title}\u201d (${ok.length}/${TEAM.agents.length} subtasks delivered):\n\n${merged}`);
-    await audit("workforce", `Workforce finished on "${g.title}" (${ok.length}/${TEAM.agents.length} ok)`);
-    s.counters.actions++;
-    setRT({last:"Workforce finished: "+g.title.slice(0,50)});
+    const merged=await agentMerge(ai, g, ok, {allCopy:"Every workforce agent failed. ", withSteering:false,
+      mergeSys:"You are the coordinator. Merge your workforce's deliverables into one coherent final answer: keep what survives scrutiny, resolve conflicts, drop what failed. End with one line naming what you merged."});
+    await agentFinish(s, g, ok, merged, {noun:"Workforce", unit:"subtasks", auditKind:"workforce"});
   }catch(e){
-    await addMsg("sys", "Workforce run failed. " + friendlyModelError(e));
-    await audit("error", `Workforce run failed on "${g.title}": ${String(e.message||e).slice(0,120)}`);
+    await teamFail(g, e, "Workforce");
   }
-  TEAM.active=false; TEAM.agents=[];
-  setRT({state:"idle", step:"", tool:""});
-  await Store.save(); renderAll();
+  await teamCleanup();
 }
 
 /* ---------------- roster + automations (Eigent: custom workforce, scheduled runs) ----------------
