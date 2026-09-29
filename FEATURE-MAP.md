@@ -108,6 +108,10 @@ rail (provider/model/key presence) - tap opens Settings.
   session-only; cards default to collapsed.
 - Tasks: "Add a task" input + Add task - tracked open/done, shown in chat when
   relevant. Export: Export Markdown / Export CSV buttons.
+- Header layout (gen 37): controls live in a dedicated .viewactions row
+  under the subtitle - primary "+ New goal" first, Autonomous checkbox,
+  then the two exports demoted to small ghost buttons. Same ids/handlers;
+  the task input placeholder no longer clips at 390px.
 - Plans advance in chat ("advance" continues a paused plan).
 
 ## Habits (#view-habits)

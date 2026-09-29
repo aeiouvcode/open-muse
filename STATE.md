@@ -47,11 +47,13 @@
   item-by-item with runnable proof per item.
 
 
-- Local HEAD: gen 34 commit (attachments - text/image upload, PLAN move 6) -
-  see git log. Gen 34 evidence: 26/26 self-tests via control CLI (7 new
-  attachment rows), end-to-end CLI eval (fold-in + image att + bubble),
-  390px screenshots of chips + sent bubble. Also repaired the control
-  script's --setup flag (async setups never invoked - see MISTAKES).
+- Local HEAD: gen 37 commit (Goals & plans 390px action-row redesign,
+  design-led cycle) - see git log. Evidence: doctor 7/7, 26/26
+  self-tests, CLI eval asserts (viewactions row order, placeholder fits,
+  ghost applied), 390px before/after + habits/memory regression shots.
+- Previous: gen 36 (dead-code audit, near-zero yield) - see git log;
+  gen 35 (Team/Workforce one-skeleton, last File-published);
+  gen 34 (attachments - text/image upload, PLAN move 6).
 - Previous: gen 33 (coder benchmark harness + runSandboxed repair) -
   see git log. Recovered 2026-09-27 17:4x IST from Instinct
   File revision filerevision-01M3GQXXY5E5694EDNKF8S82T0 after the sandbox
@@ -68,7 +70,7 @@
   live - no public Pages deploy, no public File publish - without his
   explicit yes relayed by main. Commits, QA, push prep, PRIVATE File
   publishes are expected.
-- Instinct File (PRIVATE): current at gen 32.
+- Instinct File (PRIVATE): current at gen 35 (gen 37 publishing this run).
   https://files.instinct.com/file-01M326APAT2KA6SM3C2HG5XAEB
 - Midnight wake (00:30 IST): push-prep only - inventories the staged diff,
   re-verifies QA locally, reports readiness. No push.

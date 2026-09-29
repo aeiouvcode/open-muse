@@ -382,3 +382,37 @@ Next cycle candidates (ranked):
    and deepen it - critic gate grades from 390px evidence).
 2. Engine verification (move 4) - still blocked on the owner's phone.
 3. PDF support (move-6 delta) - needs a real parser decision.
+
+---
+# Gen 37 design log (RULE 6, 2026-09-29 17:50) - Goals & plans 390px action-row redesign
+
+Problem restated: the Goals & plans viewhead at 390px wraps its four
+controls (Autonomous checkbox, Export Markdown, Export CSV, + New goal)
+into a ragged two-row scatter next to a full-width subtitle - the primary
+action (+ New goal) lands mid-row-2 with no visual priority, and the two
+export buttons carry the same weight as the primary. In the taskbox, the
+"Add a task" input clips its own placeholder ("Muse tracks it t...") at
+390px. Fresh 390px evidence: /tmp/om-goals.png (pre-change).
+
+Candidate designs:
+A. CHOSEN: a standard full-width .viewactions row inside the viewhead,
+   below title+sub: [+ New goal] primary first, Autonomous checkbox next,
+   spacer, then Export Markdown / Export CSV demoted to small ghost
+   buttons. Placeholder shortened to "Add a task..." so nothing clips;
+   the existing muted line under the row keeps the full explanation.
+   Zero behavior change - same ids, same handlers, same sync logic.
+B. Overflow "..." menu for the exports. Rejected: hides a discoverable,
+   harmless action behind chrome; more JS for no gain (Rule 7).
+C. Move exports into the empty-state card. Rejected: controls vanish
+   once a goal exists; position depends on data state.
+
+Pass tests (keyless, via control-openmuse.mjs eval + screenshots):
+- goals viewhead contains .viewactions with newgoalbtn as its first
+  button; newgoalbtn's top is below the subtitle's bottom (row order).
+- newtask placeholder rendered width (canvas measureText at computed
+  font) fits inside input.clientWidth at 390px.
+- autonomycb still reflects permMode after a mode switch (existing 26
+  self-tests stay green; no handler touched).
+- 390px screenshots: goals view before/after; habits + memory views
+  re-shot to prove no regression from shared CSS (.trow/.btn untouched,
+  ghost is additive).
