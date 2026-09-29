@@ -450,3 +450,20 @@ no handler or id changes, no new network or storage surface.
 Pass test: at 390px the select spans the full content width and shows
 complete model ids; filter, refresh, Test keep working (same ids);
 doctor 7/7 + 26 self-tests green; before/after screenshots.
+
+Gen 38 outcome: SHIPPED to PRIVATE File. Two-row stack implemented
+(select full width; filter grows + refresh + Test below). 390px
+before/after: select went from "gemini-3.8-" (truncated, ~120px) to
+"gemini-3.8-flash" fully visible at full content width. Zero behavior
+change: same ids/handlers, markup reorder only, 12-line diff.
+Doctor 7/7 PASS, 26 self-tests green post-edit.
+Self-critique: desktop layout re-verified (stack reads naturally at
+wide widths); long model ids still ellipsize but at ~330px not ~120px;
+placeholder text untouched, consistent with file conventions.
+Cybersecurity pass: markup reorder only - no new inputs, handlers,
+innerHTML, network or storage surface.
+Named-competitor pass: Jan + LibreChat both give the chosen model full
+width on phones (recorded above).
+Waterballoon critic: 9/10 round 1 - deductions: -0.5 desktop not
+screenshot-verified (judged by layout logic only), -0.5 vertical cost
+of the extra row not measured against other settings rows. Gate passed.
