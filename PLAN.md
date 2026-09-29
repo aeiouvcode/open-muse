@@ -254,3 +254,102 @@ a deliberately network-reaching candidate is blocked and counted; replay
 of the recorded run reports an exact sequence+verdict match; a wrong
 candidate (returns garbage) FAILS with named failed assertions; results
 render in the coder bench with an honest overall label.
+
+---
+# Gen 35 design log (RULE 6, 2026-09-28 23:45) - Rule 7 leanness: orchestration-path consolidation
+
+Problem restated: Rule 7 asks for a redundancy hunt with before/after
+numbers. Hunt results (2026-09-28, app.js 4,948 lines): zero dead
+functions (the __eq/__deep/__trap single-mentions are eval-string test
+helpers, alive by design); zero repeated 4-line blocks beyond two 2x
+micro-dups; the one real find is STRUCTURAL: runTeam (classic, 81 lines)
+and runWorkforce (110 lines) are two parallel multi-agent orchestration
+paths with identical skeletons - spawn loop with tool-call handling,
+merge block, all-failed merge, addMsg+audit+counters+setRT tail,
+try/catch with sys message + error audit, TEAM cleanup x2. Convergent
+evolution left the same machine written twice.
+
+Hunt evidence (negative results are assets): dead-function scan clean;
+identifier-insensitive 5-line block scan found 18 groups, all either
+consecutive registrations (cloak patterns, not extractable), micro-dups
+(chatSearch cur-marking 2x, settings-save 2x), or the Team/Workforce
+pair above.
+
+Scope decision: consolidate the SHARED SKELETON only. What stays
+deliberately distinct (parameterized, never unified): role-prompt source
+(AgentRoles vs rolePrompt), tool policy (researcher-only vs scope-denied
+audit path - Workforce's denial path is a real behavior, not dup), and
+all user-visible copy ("Team merge"/"orchestrator" vs "Workforce
+merge"/"coordinator"). This is a behavior-preserving refactor, not a
+feature merge; both front-ends stay live and byte-identical in output.
+
+Candidate designs:
+A. CHOSEN: extract agentMerge(g, ok, {noun, mergeSys, auditKind}),
+   agentAllFailed(err, noun), teamFail(g, e, noun), teamCleanup() as
+   shared helpers; both run paths call them with their own copy/policy
+   arguments. Plus the two micro-dups: chatSearchShowCur(hits) helper,
+   saveSettingKey(inputId, settingsKey, auditLabel) helper.
+B. Fold Team into Workforce with a compat shim. Rejected: Workforce's
+   tool policy is stricter; a shim hides a real semantic difference and
+   risks silently downgrading Team behavior.
+C. Leave it; 1% is below the noise floor. Rejected: Rule 7 is the
+   owner's explicit cycle ask, and the twin paths are the top future-bug
+   farm (fix one, forget the other).
+
+Before numbers (to be re-measured after): app.js 4,948 lines; runTeam 81
+(4323-4403), runWorkforce 110 (4404-4513); duplicated skeleton est.
+~45-55 lines; micro-dups ~12 lines. Target: net -55 to -65 lines, zero
+behavior change.
+
+Pass tests (keyless, via control-openmuse.mjs eval; behavior-preserving
+proof, not just "it runs"):
+- Pre-change fixture: synthetic team goal + workforce goal run with a
+  stubbed ai.generateText; record the exact audit sequence, addMsg
+  labels, and counter deltas. Post-change run of the same fixture must
+  produce byte-identical sequences (non-vacuous: fixture asserts >=6
+  distinct audit/message events per path).
+- Workforce scope-denied path still emits its denial audit line and the
+  "tools are off" user copy (guards against accidental unification).
+- Keyless gate: both paths refuse with the same honest copy as before.
+- 390px screenshot: team launch buttons + workforce view unchanged.
+
+---
+# Gen 35 outcome log (2026-09-29 05:50) - Rule 7 leanness: SHIPPED net 0, honest miss on the line target
+
+What shipped: the Team/Workforce shared skeleton is now ONE machine.
+agentMerge (all-failed copy + merge head parameterized), agentFinish
+(merge post + audit + counter + last-step), teamFail, teamCleanup,
+chatSearchShowCur, saveSettingKey. Call sites keep their own copy, role
+prompts, and tool policy. Workforce's scope-denied path is untouched and
+fixture-proven.
+
+Before/after numbers (the honest part): app.js 4,948 -> 4,948 lines.
+Target was net -55 to -65. The estimate assumed helper scaffolding was
+free; it costs ~30 lines against ~40 saved, and the micro-dups nearly
+break even. An extra extraction (teamGoal) made it WORSE (+3) and was
+reverted on measurement. Result: zero net lines, one skeleton instead of
+two. The win is maintenance (fix one path, not two), not byte count.
+
+Proof of behavior preservation (RULE 5, via control-openmuse.mjs eval):
+stubbed-AI fixture ran team mode, workforce mode, and both no-key
+failure gates pre- and post-change. Event streams (audit kinds+text,
+addMsg roles+text, counter deltas, Store.save calls) are BYTE-IDENTICAL:
+22 distinct events both runs, including "Denied 1 tool call from coder"
+(scope policy intact) and both friendlyModelError fail gates. Doctor:
+7/7 PASS, 26 self-tests green. 390px screenshots (goals, workforce):
+layouts unchanged.
+
+Self-critique: the line target missed and I ship it anyway - the
+alternative was leaving a known twin-machine bug farm in place because
+the estimate was wrong. PARTIAL on the metric, PASS on the structure.
+Cybersecurity pass: no new inputs, no new network surface, tool policy
+bit-identical (fixture-proven), no secrets touched. PASS.
+Competitor pass (Eigent/CAMEL, our workforce inspiration): they run ONE
+orchestration engine with pluggable policies; this cycle moves us the
+same direction. Remaining honest gap: spawn loops still differ
+(parallel map vs dependency waves) - deliberately, that IS the feature
+difference.
+Waterballoon critic gate: 8/10. Deductions: headline metric missed
+(-1.5); a skeptic can call a net-zero cycle cosmetic (-0.5). Held at 8
+because the behavior proof is byte-level, the negative result is
+recorded with numbers, and the structural debt is actually gone.

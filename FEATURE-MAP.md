@@ -233,3 +233,10 @@ rail (provider/model/key presence) - tap opens Settings.
   encrypted with the Personal VM passphrase. Keys: session-only by default,
   device-persisted only if "Remember key" is checked. Nothing is sent anywhere
   except the chosen provider/tool endpoints.
+
+---
+# Gen 35 note (2026-09-29): NO behavior change. The Team/Workforce
+# consolidation was internal refactoring only; every trigger path, copy,
+# tool policy, and failure mode in this map is unchanged and was proven
+# byte-identical by the gen-35 stubbed-AI fixture (see PLAN.md gen-35
+# outcome log).

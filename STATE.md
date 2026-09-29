@@ -82,3 +82,14 @@
 - Note: this file absorbs the old CURRENT_TASK.md / CHECKPOINT.md (retired
   2026-09-26 for the fleet-standard spine). HANDOFF.md kept for
   cross-session continuity.
+
+---
+# Gen 35 state (2026-09-29 05:50 IST)
+- Team/Workforce consolidation SHIPPED: one skeleton (agentMerge,
+  agentFinish, teamFail, teamCleanup), net 0 lines (target missed; see
+  MISTAKES.md and PLAN.md gen-35 outcome). Behavior proven byte-identical
+  via stubbed-AI fixture (22 events both runs, scope-denied path intact).
+  Doctor 7/7 PASS, 26 self-tests green. 390px layouts unchanged.
+- Waterballoon critic: 8/10 (gate passed). Full passes in PLAN.md.
+- Next cycle candidates: line-count leanness via real deletion (dead
+  code hunt), or engine verification move 4 (still needs owner's phone).
