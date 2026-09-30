@@ -47,7 +47,7 @@
   item-by-item with runnable proof per item.
 
 
-- Local HEAD: gen 37 commit (Goals & plans 390px action-row redesign,
+- Local HEAD: gen 41 commit (Workforce roster rows 390px header split) - see git log.
   design-led cycle) - see git log. Evidence: doctor 7/7, 26/26
   self-tests, CLI eval asserts (viewactions row order, placeholder fits,
   ghost applied), 390px before/after + habits/memory regression shots.
@@ -147,3 +147,31 @@
   full-width check-in on phone; we now match.
 - Next: design-led cycle, engine verification move 4 (owner's phone),
   PDF support (move-6 delta).
+
+---
+# Gen 41 state (2026-09-30 17:52 IST)
+- Workforce roster rows 390px header split SHIPPED: .agrow rows (name +
+  gear chip header line, description full measure below, hairline
+  separator) replacing the shared .skill single-line squeeze; the
+  per-row duplicated privacy meta span dropped (stated once in the
+  Roster sub-head; tools state already on the chip). Add-agent and
+  add-automation inputs flex-basis:100% at <=820px (placeholders no
+  longer truncate mid-word). Markup + CSS, zero behavior change.
+  PRIVATE File file-01M326APAT2KA6SM3C2HG5XAEB generation 40, revision
+  filerevision-01M3S465QWPK322N07QHPSA1W2. Preview exercised in the
+  File viewer frame at 390px: 4 .agrow rows, 0 duplicated meta
+  occurrences, 4 data-agtools buttons, add-agent input 306px.
+- Doctor 7/7 PASS, 26 self-tests green post-change. Behavior proof:
+  researcher gear on -> off -> on round trip via CLI eval (flipped
+  true, roundtrip true). File built from `tools file checkout` of the
+  published gen-40 revision; openmuse.ts/style.css confirmed verbatim
+  copies of app.js/styles.css before patching.
+- Waterballoon critic 9/10 round 1 (-0.5: workforce viewhead sub still
+  6 lines at 390px, out of scope; -0.5: automations .rem rows keep the
+  old single-line pattern, deferred - empty by default, gen-42
+  candidate). Competitor pass vs Eigent: its roster rows put the
+  control on the header line with description below at phone width;
+  the old squeeze was below that norm, the split matches.
+- FEATURE-MAP unchanged (no behavior change).
+- Next: design-led cycle (automations .rem rows at 390px, seeded),
+  engine verification move 4 (owner's phone), PDF support.

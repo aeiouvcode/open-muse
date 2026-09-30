@@ -126,3 +126,9 @@ on structure, not bytes.
     built by string concatenation ('mdh'+headingLevel) in the markdown
     renderer. Lesson: before deleting any class, grep for its PREFIX as
     a concatenation source; token search alone gives false corpses.
+
+## 2026-09-30 - control eval measures zero rects on hidden views
+getBoundingClientRect() on #newagentname returned 0x0 because eval ran
+while the chat view was active - workforce sections are display:none.
+Lesson: in control eval assertions, click the nav button and wait
+~200ms before measuring; a 0-width "pass" is a vacuous measurement.
