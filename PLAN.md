@@ -608,3 +608,6 @@ Addendum (same pass): the add-agent and add-automation input rows cramped
 to ~140px columns at 390px, truncating placeholders mid-word. Scoped fix:
 #newagentname/#newagentprompt/#newautotext flex-basis:100% inside a
 max-width:820px rule (3 selectors, no shared .trow change). Zero JS.
+
+## Gen 41 public rollout closeout (2026-09-30 22:36 IST)
+Problem: publish approved behind-public build without overwriting origin history or calling an old CDN response live. Plan completed: inspect divergence, merge non-force, fresh local doctor, push, wait for live three-file hash equality, live doctor/snapshot/390px pixel inspection. PASS; no code changes beyond the already QAed gen41 stack.

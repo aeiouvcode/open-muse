@@ -175,3 +175,9 @@
 - FEATURE-MAP unchanged (no behavior change).
 - Next: design-led cycle (automations .rem rows at 390px, seeded),
   engine verification move 4 (owner's phone), PDF support.
+
+---
+# Gen 41 public release (2026-09-30 22:36 IST)
+- Owner batch go-live: original WhatsApp 22:26:52 "go public where it's behind".
+- Public main c05a437713d9959498414908feeb176a23ae79ac, non-force merge of origin gen38 history and local gen39-41 stack. Docs-only conflicts retained local newer records.
+- LIVE PASS https://aeiouvcode.github.io/open-muse/: control CLI live SHA256 app.js/styles.css/index.html exactly matches local; doctor 7/7, 26 self-tests, snapshot no errors. Actual live 390px Workforce pixels inspected, byte-identical screenshot to local reference. Critic 9/10 round 1 unchanged. PRIVATE File audience unchanged.
