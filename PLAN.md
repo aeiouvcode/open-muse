@@ -467,3 +467,78 @@ width on phones (recorded above).
 Waterballoon critic: 9/10 round 1 - deductions: -0.5 desktop not
 screenshot-verified (judged by layout logic only), -0.5 vertical cost
 of the extra row not measured against other settings rows. Gate passed.
+
+---
+# Gen 39 plan (2026-09-30 05:50 IST) - design-led cycle: Permissions cards + Evolve box at 390px
+
+## Problem restated
+Two remaining 390px fit defects, both verified in screenshots this run:
+
+1. Permissions (connectors) cards: `.conn` is a single flex row -
+   glyph (38px) + info + three-way scope switch. At 390px the switch
+   takes ~180px and the glyph+gaps+padding ~92px, leaving the
+   title/description ~100px wide. "See availability, draft events"
+   wraps to 3 lines in a thin column beside the switch. Cramped,
+   hard to scan, the worst remaining mobile layout.
+2. Evolve box textarea: `#evoask` is rows="2" but its placeholder
+   needs 3 lines at 390px, so the placeholder visibly clips
+   ("...(blank = Muse picks the highest-value fi|" with the resize
+   handle cutting the text). A clipped sentence reads as broken.
+
+## Designs considered
+A. Permissions: keep one row, shrink the switch (smaller buttons /
+   shorter labels). Rejected: touch targets drop under 44px and
+   "read+write" truncates - trades one defect for another.
+B. Permissions: two-row stack inside the existing 820px media query -
+   `.conn{flex-wrap:wrap}` so glyph+info stay on row 1 (info now gets
+   ~250px) and the scope switch wraps to a full-width row 2 with three
+   equal buttons (`flex:1`). Same pattern as gen-37 goals row and
+   gen-38 settings picker. Chosen.
+C. Evolve: rows="2" -> rows="3" so the full placeholder is visible.
+   Chosen over shortening the placeholder (the sentence is honest
+   about the blank-case behavior - keep the words, fix the fit).
+D. Evolve: auto-growing textarea JS. Rejected: JS for a static
+   fit problem is weight without benefit; rows="3" fixes the clip
+   and typing already scrolls/resizes.
+
+## Scope
+Markup/CSS only, zero behavior change: same ids, same handlers,
+same state paths. No new systems (owner steering: DESIGN over new
+systems).
+## Pass tests
+- 390px screenshots: permission card description reads on a wide
+  measure with the switch full-width below; Evolve placeholder fully
+  visible, no clip.
+- Desktop (wide) layout unchanged: fixes live inside max-width:820px
+  except rows="3", which is benign at any width.
+- Doctor 7/7 PASS, 26 self-tests green, FEATURE-MAP unchanged
+  (no behavior change).
+
+## Gen 39 outcome + passes (2026-09-30 05:50 IST)
+- SHIPPED locally: Permissions cards two-row stack at <=820px (glyph +
+  title/desc row, full-width scope switch, 44px targets) + Evolve
+  textarea rows=3 (placeholder no longer clipped). index.html 1 line,
+  styles.css 4 lines, zero JS, zero behavior change (same ids/handlers;
+  renderConnectors untouched).
+- 390px before/after screenshots verified: description now reads on a
+  full measure ("Prepare checkouts (always needs approval)" one line),
+  switch equal-thirds below; Evolve placeholder fully visible.
+- Behavior proof: email connector off->read->off round trip via control
+  eval; re-render lands the .on class on the clicked value each time.
+- Media-scope verified programmatically: .conn rules sit inside the
+  max-width:820px block (brace-balance check); desktop CSS untouched.
+- Doctor 7/7 PASS, 26 self-tests green after the change.
+- Self-critique: .seg margin-top:2px is eyeballed, not scale-derived;
+  accepted for card density. Evolve textarea slightly taller on
+  desktop - benign. No other regressions spotted.
+- Cybersecurity pass: no JS, handlers, network, or input-path changes;
+  no new user-visible strings (branding audit trivially clean);
+  permission switching state path unchanged. PASS.
+- Named-competitor pass (LibreChat): its mobile settings stack label
+  above control at phone width; our previous single-row squeezed the
+  label column, which LibreChat avoids. The two-row stack matches the
+  norm. The clipped placeholder was below any competitor's form bar.
+- Waterballoon critic 9/10 round 1 (gate passed): deductions -0.5
+  eyeballed 2px rhythm, -0.5 single-connector behavior proof (shared
+  binding makes five-way proof redundant, noted honestly).
+- FEATURE-MAP unchanged (no behavior change).

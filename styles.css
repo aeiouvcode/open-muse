@@ -236,6 +236,10 @@ aside.rail.open{display:flex;position:fixed;left:0;top:0;bottom:0;width:min(300p
 .mhrow{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
 .mhfit.good{color:#2e7d32}.mhfit.warn{color:#a3620b}.mhfit.bad{color:#b3331e}
 .btn.sm{padding:6px 12px;font-size:12.5px;min-height:36px}
+/* gen-39: permission cards stack at phone width - switch full-width row below */
+.conn{flex-wrap:wrap}
+.conn .seg{width:100%;margin-top:2px}
+.conn .seg button{flex:1;padding:8px 6px;min-height:44px}
 /* composer: stay above the keyboard, no iOS focus-zoom, safe-area aware */
 #composer{padding:10px var(--pad) calc(10px + env(safe-area-inset-bottom));gap:8px}
 #composer textarea{font-size:16px;min-height:48px}
