@@ -111,3 +111,19 @@
   gate CLOSED: local commits + PRIVATE File only.
 - Next: design-led cycle, engine verification move 4 (owner's phone),
   PDF support (move-6 delta).
+
+---
+# Gen 39 state (2026-09-30 05:52 IST)
+- Permissions cards 390px two-row stack + Evolve textarea clip fix
+  SHIPPED: markup/CSS only, zero behavior change. PRIVATE File
+  file-01M326APAT2KA6SM3C2HG5XAEB generation 38, revision
+  filerevision-01M3QTZMC4ZDEH9243Q9T300NV. Preview exercised in the
+  File viewer frame (app boots, evoask rows=3, 5 cards/15 buttons).
+  Doctor 7/7 PASS, 26 self-tests green. Behavior proof: email
+  connector off->read->off round trip. Waterballoon critic 9/10
+  round 1. Go-live gate CLOSED: local commits + PRIVATE File only.
+- Lesson paid off: local port dir open-muse-file was stale (missing
+  gen-36/37/38); building from `tools file checkout` caught it.
+  Port dir re-synced from the checkout after the build.
+- Next: design-led cycle, engine verification move 4 (owner's phone),
+  PDF support (move-6 delta).
