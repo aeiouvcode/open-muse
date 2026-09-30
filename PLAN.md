@@ -542,3 +542,29 @@ systems).
   eyeballed 2px rhythm, -0.5 single-connector behavior proof (shared
   binding makes five-way proof redundant, noted honestly).
 - FEATURE-MAP unchanged (no behavior change).
+
+---
+# Gen 40 - Habits rows 390px stack (design-led, owner steering)
+## Problem (restated)
+On a 390px phone, a populated habit row crushes the habit name to ~90px:
+"Read 20 pages of a French novel" wraps to 5 lines, the streak phrase
+"7 days in a row" wraps mid-phrase, and the 7-day dots + delete x fight
+the Check-in button for horizontal space. Empty states looked fine in
+the gen-39 survey; the failure only appears with real data. Verified
+with a seeded 3-habit screenshot at 390px.
+## Options
+A. Vertical restack at <=820px: row 1 = name + cadence pill + streak
+   meta (full width) with delete x top-right; row 2 = 7-day dots +
+   full-width Check-in (44px target). Same pattern as gen-37/38/39.
+   Chosen: pure CSS (flex-wrap + order), zero markup/JS change.
+B. Shrink dots and let the name flex. Rejected: still a 5-line name.
+C. Truncate long habit names with ellipsis. Rejected: hiding the user's
+   own words is the cheap way out; the stacked card reads fully.
+## Scope
+CSS only, inside the existing max-width:820px block. Zero behavior
+change: same ids, same handlers, same state paths. Desktop untouched.
+## Pass tests
+- 390px seeded screenshot: name on max 2 lines, streak phrase on one
+  line, dots + full-width Check-in on their own row.
+- Media-scope brace check: rules inside the 820px block only.
+- Doctor 7/7 PASS, 26 self-tests green. FEATURE-MAP unchanged.

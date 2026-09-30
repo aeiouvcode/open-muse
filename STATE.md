@@ -127,3 +127,23 @@
   Port dir re-synced from the checkout after the build.
 - Next: design-led cycle, engine verification move 4 (owner's phone),
   PDF support (move-6 delta).
+
+---
+# Gen 40 state (2026-09-30 11:51 IST)
+- Habits rows 390px stack SHIPPED: pure-CSS restack at <=820px (name +
+  streak meta full width, delete x top-right, dots + full-width 44px
+  Check-in row below). Zero markup/JS/behavior change. PRIVATE File
+  file-01M326APAT2KA6SM3C2HG5XAEB generation 39, revision
+  filerevision-01M3RFEEJ3W56M6CXHX7MG7NFG. Preview exercised in the
+  File viewer frame at 390px (3 seeded habits, check-in round trip,
+  habit row 118px stacked / check-in 217px wide).
+- Doctor 7/7 PASS. Self-tests 25/26; the single failure "model key
+  configured" is env-only (no key in fresh headless profile) and
+  reproduces identically on the pre-change baseline (git stash check).
+- Behavior proof: check-in toggles off -> "Done today" -> off.
+- Waterballoon critic 9/10 round 1 (-1: delete x is 36px, under the
+  44px touch guideline; accepted as a rare secondary action).
+  Competitor pass vs Habitify/Streaks: both stack name over a
+  full-width check-in on phone; we now match.
+- Next: design-led cycle, engine verification move 4 (owner's phone),
+  PDF support (move-6 delta).
