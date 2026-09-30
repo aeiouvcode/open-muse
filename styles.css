@@ -662,3 +662,11 @@ html[data-theme] select{padding-right:28px;background-image:linear-gradient(45de
 .habit .habdots{order:3;align-self:center}
 .habit [data-habcheck]{order:4;flex:1 1 auto;min-height:44px}
 }
+/* Automations: separate task, timing and controls on phone. Reminders unchanged. */
+@media(max-width:820px){
+ #autolist .rem{display:grid;grid-template-columns:20px 1fr 1fr;gap:8px;padding:14px 0;border-bottom:1px solid var(--line)}
+ #autolist .rem>.txt{grid-column:2/4;line-height:1.5;overflow-wrap:anywhere}
+ #autolist .rem>span:nth-child(3){grid-column:2/4;font-size:12px;color:var(--dim)}
+ #autolist .rem>[data-autotoggle]{grid-column:2;min-height:44px}
+ #autolist .rem>[data-autodel]{grid-column:3;min-height:44px}
+}

@@ -611,3 +611,12 @@ max-width:820px rule (3 selectors, no shared .trow change). Zero JS.
 
 ## Gen 41 public rollout closeout (2026-09-30 22:36 IST)
 Problem: publish approved behind-public build without overwriting origin history or calling an old CDN response live. Plan completed: inspect divergence, merge non-force, fresh local doctor, push, wait for live three-file hash equality, live doctor/snapshot/390px pixel inspection. PASS; no code changes beyond the already QAed gen41 stack.
+
+# Gen 42 plan (2026-09-30 23:44 IST): populated automation rows at 390px
+Problem restated: automation rows still share the one-line reminder layout, squeezing long task text beside cadence, next-run metadata and two controls. Empty default state hid the problem in earlier screenshots.
+Candidate A: wrap the shared .rem row (risks reminders elsewhere). Rejected for scope.
+Candidate B: scoped #autolist grid with text across first row, metadata across second and two 44px controls on a third row at <=820px. Selected: clear reading order, no logic change or shared reminder styling. First seed two paused rows, inspect actual 390px pixels. Prove row counts, control counts, bounds and paused/active toggle roundtrip with control CLI; compare seeded before/after. Then self/security/competitor critique and PRIVATE File checkout-based publication only if >=8. Public remains gen41 absent new owner yes.
+
+Gen42 result: seeded before view compressed task text to a ~64px column and 10 lines; scoped grid gives 286px text, two lines, timing below, two 139x44px controls. Toggle paused->active->paused proved, rows/buttons remain one-to-one, doctor7/7 and 26 tests PASS.
+Self-critique: better scanning and finger targets, but glyph-only pause/delete are still less explicit than labels; long viewhead remains. Cybersecurity PASS for this delta: CSS-only, no requests/storage/permission change, app.js unchanged, escaped automation text/control event handlers untouched. No secret/branding strings added. Named competitor pass: Eigent roster header/control split remains the reference from gen41; no fresh competitor product claim this cycle. Scoped grid uses the same content-first hierarchy, but our destructive control takes more area than ideal.
+Waterballoon critic round1 8.5/10: -0.5 glyph-only toggle labels, -0.5 delete now has equal weight with pause, -0.5 long Workforce explanatory copy. Pass, no behavior change; FEATURE-MAP unchanged. Actual populated 390px pixels inspected before/after, not empty state.

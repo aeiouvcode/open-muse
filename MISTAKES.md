@@ -134,3 +134,5 @@ Lesson: in control eval assertions, click the nav button and wait
 ~200ms before measuring; a 0-width "pass" is a vacuous measurement.
 
 - 2026-09-30 public release: origin/main was five commits ahead on a divergent gen38 publication chain. Checked actual diff before non-force merge; only PLAN/STATE conflicts (newer local appendices vs empty origin side). Live Pages initially served old bytes, so held completion until 22:35 live CLI hashes and 390px pixels matched. CLI has no --help verb; inspected command usage/source rather than repeat that failed invocation.
+
+- Gen42 File build filebuild-01M3SRD66GEP1PHG26JPP6D61E failed: service diagnostics "detached child processes were terminated after bash returned; use wait to collect background jobs before the command exits". Build action itself was foreground; no caller background process used. Not a source syntax diagnostic. Reported parent, no publication or blind retry. Local doctor and syntax pass.
