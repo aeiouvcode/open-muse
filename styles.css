@@ -310,6 +310,11 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--acc);flex:none}
 .skill .txt{flex:1}
 .skill .txt b{display:block;font-size:13.5px}
 .skill .txt span{color:var(--dim);font-size:12px}
+.agrow{padding:10px 0;border-bottom:1px solid var(--line);font-size:13px}
+.agrow .aghead{display:flex;align-items:center;gap:9px}
+.agrow .aghead b{flex:1;min-width:0;font-size:13.5px}
+.agrow .agbtns{display:flex;gap:6px;flex:none}
+.agrow .agdesc{display:block;margin-top:3px;color:var(--dim);font-size:12px;line-height:1.45}
 .mcp{display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px;flex-wrap:wrap}
 .mcp .txt{flex:1;min-width:160px}
 .mcp .txt b{display:block}
@@ -357,6 +362,7 @@ input[type=checkbox]{width:18px;height:18px;accent-color:var(--acc);flex:none}
 #modebar{padding-left:64px}
 .modebtn{padding:10px 16px;font-size:13px}
 .trow input[type=text],.trow input:not([type]){min-width:140px}}
+@media (max-width:820px){#newagentname,#newagentprompt,#newautotext{flex-basis:100%}}
 
 .suggest .s-b{display:flex;gap:8px;flex:none;align-self:center}
 

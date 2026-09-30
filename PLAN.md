@@ -568,3 +568,43 @@ change: same ids, same handlers, same state paths. Desktop untouched.
   line, dots + full-width Check-in on their own row.
 - Media-scope brace check: rules inside the 820px block only.
 - Doctor 7/7 PASS, 26 self-tests green. FEATURE-MAP unchanged.
+---
+# Gen 41 - Workforce roster rows 390px header split (design-led)
+## Problem (restated)
+On a 390px phone, every roster row is a single flex line: a 3-line text
+block (name, description, meta) squeezed into ~280px by a vertically-
+centered gear chip pinned at the right edge; the chip floats against
+whitespace while the text column crams. Worse, the meta line repeats
+the same privacy sentence - "Sees only its subtask + teammates'
+outputs - never your chats, memory, or keys. Tools: on." - verbatim on
+all 4 built-in rows, though it is already stated once in the Roster
+card sub-head; and the "Tools: on/off" half duplicates the gear chip's
+own label. Verified with the 390px workforce screenshot this run.
+## Options
+A. Header-split row: line 1 = agent name (flex) + gear chip (+ delete x
+   for custom agents) top-aligned right; description below at full
+   measure. Drop the per-row meta span entirely. New .agrow class so
+   the shared .skill class (cloak rules, skills list) is untouched.
+   Markup in renderWorkforce + CSS; zero behavior change (same
+   data-agtools/data-agdel attrs and handlers). Chosen.
+B. Pure-CSS reorder of .skill. Rejected: .skill is shared by cloak
+   rules and the skills list; a shared restyle would move their
+   buttons too, and the meta-span duplication survives.
+C. Trim the Roster sub-head instead. Rejected: the one place the
+   privacy promise belongs is the card sub-head; the duplication is
+   in the rows.
+## Scope
+app.js renderWorkforce roster row markup only; styles.css new .agrow
+rules (not media-scoped - the split is right at every width; desktop
+gets the same cleaner row). Zero state/handler change.
+## Pass tests
+- 390px before/after screenshots: chip top-aligned with the name, desc
+  on full measure, no duplicated privacy sentence.
+- CLI eval asserts: 4 .agrow rows, 0 occurrences of "Sees only its
+  subtask" inside #rosterlist, 4 data-agtools buttons, gear toggle
+  still flips on click (state + re-render).
+- Doctor 7/7 PASS, 26 self-tests green. FEATURE-MAP unchanged.
+Addendum (same pass): the add-agent and add-automation input rows cramped
+to ~140px columns at 390px, truncating placeholders mid-word. Scoped fix:
+#newagentname/#newagentprompt/#newautotext flex-basis:100% inside a
+max-width:820px rule (3 selectors, no shared .trow change). Zero JS.

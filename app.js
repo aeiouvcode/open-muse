@@ -4521,7 +4521,7 @@ function renderWorkforce(){
       ...(s.agents||[]).map(a=>({id:a.id,name:a.name,desc:a.prompt,builtin:false}))
     ].map(a=>{
       const tools=roleToolsAllowed(a.name);
-      return `<div class="skill"><span class="txt"><b>${esc(a.name)}${a.builtin?" <span style='color:var(--dim2)'>(built-in)</span>":""}</b><span>${esc(a.desc)}</span><span class="small" style="display:block;color:var(--dim2);font-size:11px;margin-top:2px">Sees only its subtask + teammates' outputs - never your chats, memory, or keys. Tools: ${tools?"on":"off"}.</span></span><button class="btn" data-agtools="${esc(a.name)}" title="Tool access for this agent: web search, page fetch, calculator" style="padding:3px 9px">${tools?"⚙ on":"⚙ off"}</button>${a.builtin?"":`<button class="btn badb" data-agdel="${a.id}" style="padding:3px 9px">×</button>`}</div>`;
+      return `<div class="agrow"><div class="aghead"><b>${esc(a.name)}${a.builtin?" <span style='color:var(--dim2)'>(built-in)</span>":""}</b><span class="agbtns"><button class="btn" data-agtools="${esc(a.name)}" title="Tool access for this agent: web search, page fetch, calculator" style="padding:3px 9px">${tools?"⚙ on":"⚙ off"}</button>${a.builtin?"":`<button class="btn badb" data-agdel="${a.id}" style="padding:3px 9px">×</button>`}</span></div>${a.desc?`<span class="agdesc">${esc(a.desc)}</span>`:""}</div>`;
     }).join("");
     $$("#rosterlist [data-agtools]").forEach(b=>b.onclick=async()=>{
       const key=b.dataset.agtools.toLowerCase();
