@@ -196,3 +196,4 @@ Gen43 PRIVATE publication complete: generation42 revisionfilerevision-01M3TD2BNR
 
 # Gen44 local PASS (2026-10-01 11:45 IST)
 Workforce header shortened to purpose + approval boundary; attribution relocated, not removed.390px header101.84px; actual pixels inspected,4 roster rows/input retained. Doctor7/7,26 tests PASS, critic8.5/10 round1. PRIVATE checkout-based build next, publicgen41 untouched.
+Gen44 PRIVATE publication complete: generation43 revisionfilerevision-01M3V1MQ0XGYVS5CQ82DZKY3MY, real UI navigation and hosted390px pixels/header101.84px/4rows/attribution PASS. Public unchangedgen41.
