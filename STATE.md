@@ -193,3 +193,6 @@
 # Gen43 local PASS (2026-10-01 05:45 IST)
 Explicit Pause/Resume and Remove automation controls plus escaped task-specific accessible names. Doctor7/7,26 tests, populated390px pixels and toggle/remove roundtrip PASS. Critic8.5/10 round1. PRIVATE File build follows; public remainsgen41.
 Gen43 PRIVATE publication complete: generation42 revisionfilerevision-01M3TD2BNR47WSNNZB9S1E18YA, hosted real-UI create/pause and390px pixels PASS. App controls135x44 inside wrapper. Public unchangedgen41. No retry needed.
+
+# Gen44 local PASS (2026-10-01 11:45 IST)
+Workforce header shortened to purpose + approval boundary; attribution relocated, not removed.390px header101.84px; actual pixels inspected,4 roster rows/input retained. Doctor7/7,26 tests PASS, critic8.5/10 round1. PRIVATE checkout-based build next, publicgen41 untouched.
