@@ -4540,8 +4540,8 @@ function renderWorkforce(){
   if(al){
     const list=s.automations||[];
     al.innerHTML=list.length?list.map(a=>`<div class="rem"><span>⏱</span><span class="txt">${esc(a.text)}</span><span>${a.cadence} · ${a.status==="active"?"next "+fmtD(a.nextRun):"paused"} · ${a.runs||0} run${(a.runs||0)===1?"":"s"}</span>
-      <button class="btn" data-autotoggle="${a.id}" style="padding:3px 9px">${a.status==="active"?"❚❚":"▶"}</button>
-      <button class="btn badb" data-autodel="${a.id}" style="padding:3px 9px">×</button></div>`).join("")
+      <button class="btn" data-autotoggle="${a.id}" aria-label="${a.status==="active"?"Pause":"Resume"} automation: ${esc(a.text)}" style="padding:3px 9px">${a.status==="active"?"Pause":"Resume"}</button>
+      <button class="btn badb" data-autodel="${a.id}" aria-label="Remove automation: ${esc(a.text)}" style="padding:3px 9px">Remove</button></div>`).join("")
       :`<div class="small" style="color:var(--dim2);font-size:12px">No automations yet.</div>`;
     $$("#autolist [data-autotoggle]").forEach(b=>b.onclick=async()=>{
       const a=s.automations.find(x=>x.id===b.dataset.autotoggle); if(!a) return;

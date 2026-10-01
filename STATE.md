@@ -189,3 +189,6 @@
 # Gen42 PRIVATE File complete (2026-10-01 00:03 IST)
 - Single approved retry build filebuild-01M3SSBS7A4ZJ1FN8WN4PPH4AG succeeded. Published PRIVATE generation41 revisionfilerevision-01M3SSBVZ4JJQW9SMP02FVDQJP.
 - Hosted preview390px UI-created long automation paused, grid task278px /buttons135x44; actual pixels inspected. Local proofs/critic8.5 round1 unchanged. Public remains gen41. Source commit7505e67 mirrored exact on open-muse-backup main. No retry remains.
+
+# Gen43 local PASS (2026-10-01 05:45 IST)
+Explicit Pause/Resume and Remove automation controls plus escaped task-specific accessible names. Doctor7/7,26 tests, populated390px pixels and toggle/remove roundtrip PASS. Critic8.5/10 round1. PRIVATE File build follows; public remainsgen41.
