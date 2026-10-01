@@ -144,7 +144,8 @@
       <div class="viewbody">
         <div class="taskbox">
           <h3 style="margin:0">Roster</h3>
-          <div class="sub" style="font-size:12px;color:var(--dim)">Four built-in specialists ship with Muse - add your own and the coordinator can assign to them too. Every agent runs scoped: it sees only its subtask and teammates' outputs, never your chats, memory, or keys, and tools (web search, page fetch, calculator) are per-agent, off unless you switch them on for that row. Same-tab isolation, not a separate machine.</div>
+          <p class="rosterintro">Four built-in specialists. Add your own for work that needs a different specialty.</p>
+          <details class="rosterscope"><summary>What agents can see and do</summary><p>Each agent sees its subtask and teammates' outputs, not your chats, memory or keys. The Tools button shows whether web search, page fetch and calculator are enabled for each agent. Isolation is within this tab, not a separate machine.</p></details>
           <div id="rosterlist"></div>
           <div class="trow"><input id="newagentname" placeholder="Agent name - e.g. Data analyst" maxlength="40"><input id="newagentprompt" placeholder="Specialty - how this agent thinks and what it outputs" maxlength="280"><button class="btn" id="addagentbtn">Add agent</button></div>
           <div class="trow" style="margin-top:6px"><button class="btn" id="exportteambtn">Share team</button><button class="btn" id="importteambtn">Import team</button><input type="file" id="importteamfile" accept="application/json,.json" hidden>
@@ -154,7 +155,7 @@
           <h3 style="margin:0">Automations</h3>
           <div class="sub" style="font-size:12px;color:var(--dim)">Recurring prompts Muse runs on a schedule while this tab is open. Tab closed = orb asleep: missed runs surface as honest catch-ups on your return - they never run somewhere else.</div>
           <div id="autolist"></div>
-          <div class="trow"><input id="newautotext" placeholder="e.g. Review my active goal and suggest the next move" maxlength="280"><select id="newautocad"><option value="hourly">Hourly</option><option value="daily" selected>Daily</option><option value="weekly">Weekly</option></select><button class="btn" id="addautobtn">Add automation</button></div>
+          <div class="trow"><input id="newautotext" placeholder="e.g. Review my active goal and suggest the next move" maxlength="280"><select id="newautocad" aria-label="Automation frequency"><option value="hourly">Hourly</option><option value="daily" selected>Daily</option><option value="weekly">Weekly</option></select><button class="btn" id="addautobtn">Add automation</button></div>
         </div>
         <div class="small" style="color:var(--dim2);font-size:12px">Run a workforce from any goal card (Goals &amp; plans &rarr; Workforce). The coordinator splits the goal into a dependency graph of subtasks, assigns each to a roster agent, runs independent subtasks in parallel waves, hands each agent its dependencies' output, then merges everything into one deliverable. Adapted from Eigent's open-source workforce, rebuilt for this browser.</div>
       </div>

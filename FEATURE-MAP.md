@@ -244,3 +244,5 @@ rail (provider/model/key presence) - tap opens Settings.
 # tool policy, and failure mode in this map is unchanged and was proven
 # byte-identical by the gen-35 stubbed-AI fixture (see PLAN.md gen-35
 # outcome log).
+
+Gen45 Workforce: identity/type above collapsed specialty descriptions; scoped explanation disclosure; 44px tool buttons with aria-pressed and rerender focus. Custom removal confirms, clears custom tool override, then focuses next custom row or Add agent. Drive via control-openmuse.mjs eval on renderWorkforce/S and screenshot --view workforce; no provider calls required.

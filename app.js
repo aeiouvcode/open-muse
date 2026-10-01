@@ -4521,7 +4521,7 @@ function renderWorkforce(){
       ...(s.agents||[]).map(a=>({id:a.id,name:a.name,desc:a.prompt,builtin:false}))
     ].map(a=>{
       const tools=roleToolsAllowed(a.name);
-      return `<div class="agrow"><div class="aghead"><b>${esc(a.name)}${a.builtin?" <span style='color:var(--dim2)'>(built-in)</span>":""}</b><span class="agbtns"><button class="btn" data-agtools="${esc(a.name)}" title="Tool access for this agent: web search, page fetch, calculator" style="padding:3px 9px">${tools?"⚙ on":"⚙ off"}</button>${a.builtin?"":`<button class="btn badb" data-agdel="${a.id}" style="padding:3px 9px">×</button>`}</span></div>${a.desc?`<span class="agdesc">${esc(a.desc)}</span>`:""}</div>`;
+      return `<article class="agrow"><div class="aghead"><div class="agidentity"><b>${esc(a.name)}</b><span class="agkind">${a.builtin?"Built-in specialist":"Custom specialist"}</span></div><button class="btn agtools" data-agtools="${esc(a.name)}" aria-label="Tool access for ${esc(a.name)}" aria-pressed="${tools}">Tools ${tools?"on":"off"}</button></div>${a.desc?`<details class="agdetails"><summary>Specialty &amp; output</summary><p class="agdesc">${esc(a.desc)}</p></details>`:""}${a.builtin?"":`<div class="agmanage"><button class="btn agremove" data-agdel="${esc(a.id)}" aria-label="Remove ${esc(a.name)} from roster">Remove agent</button></div>`}</article>`;
     }).join("");
     $$("#rosterlist [data-agtools]").forEach(b=>b.onclick=async()=>{
       const key=b.dataset.agtools.toLowerCase();
@@ -4530,10 +4530,11 @@ function renderWorkforce(){
       s.roleTools[key]=now;
       await audit("scope",`Tools ${now?"enabled":"disabled"} for agent "${b.dataset.agtools}"`);
       await Store.save(); renderWorkforce();
+      [...document.querySelectorAll("#rosterlist [data-agtools]")].find(el=>el.dataset.agtools.toLowerCase()===key)?.focus();
     });
     $$("#rosterlist [data-agdel]").forEach(b=>b.onclick=async()=>{
       const i=s.agents.findIndex(x=>x.id===b.dataset.agdel);
-      if(i>=0){ await audit("workforce",`Removed roster agent "${s.agents[i].name}"`); s.agents.splice(i,1); await Store.save(); renderWorkforce(); }
+      if(i>=0 && window.confirm(`Remove "${s.agents[i].name}" from your roster? This removes its specialty and tool settings. Existing outputs are kept.`)){ const nextName=s.agents[i+1]?.name; delete (s.roleTools||{})[s.agents[i].name.toLowerCase()]; await audit("workforce",`Removed roster agent "${s.agents[i].name}"`); s.agents.splice(i,1); await Store.save(); renderWorkforce(); const nextButton=[...document.querySelectorAll("#rosterlist [data-agtools]")].find(el=>el.dataset.agtools===nextName); (nextButton||$("#addagentbtn"))?.focus(); }
     });
   }
   const al=$("#autolist");

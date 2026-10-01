@@ -670,3 +670,25 @@ html[data-theme] select{padding-right:28px;background-image:linear-gradient(45de
  #autolist .rem>[data-autotoggle]{grid-column:2;min-height:44px}
  #autolist .rem>[data-autodel]{grid-column:3;min-height:44px}
 }
+
+/* Workforce review: scan identity first; scope and prompt details on demand. */
+.rosterintro{font-size:14px;line-height:1.5;color:var(--dim);margin:0}
+.rosterscope{font-size:13px;line-height:1.6;color:var(--dim);padding-bottom:8px}
+.rosterscope summary,.agdetails summary{cursor:pointer;min-height:44px;display:list-item;align-content:center;color:var(--ink)}
+.rosterscope p{margin:5px 0 0}
+.agrow{padding:16px 0;font-size:14px}
+.agrow .aghead{align-items:flex-start;gap:12px}
+.agidentity{flex:1;min-width:0;overflow-wrap:anywhere}
+.agrow .agidentity b{font-size:15px;display:block;line-height:1.4}
+.agkind{display:block;font-size:12px;color:var(--dim);margin-top:4px}
+.agrow .agtools{min-height:44px;min-width:94px;flex:none;font-size:13px;padding:8px 12px}
+.agtools[aria-pressed="true"]{border-color:var(--acc);color:var(--acc)}
+.agdetails{margin-top:7px;font-size:13px}
+.agrow .agdesc{font-size:13px;line-height:1.65;margin:2px 0 8px;overflow-wrap:anywhere}
+.agmanage{display:flex;justify-content:flex-end}
+.agrow .agremove{min-height:44px;background:transparent;border-color:transparent;color:var(--dim);font-size:12px;padding:8px 10px}
+.agrow .agremove:hover{color:var(--bad);border-color:var(--line)}
+
+#view-workforce .trow > .small,#autolist > .small{color:var(--ink)!important;line-height:1.6}
+
+#view-workforce .viewbody > .small{color:var(--ink)!important;line-height:1.6}
